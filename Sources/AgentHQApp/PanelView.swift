@@ -12,10 +12,11 @@ struct PanelView: View {
 
     private let tick = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
 
-    /// Rows show the name the user gave a machine in herdr, not its id.
-    private var machineNames: [MachineID: String] {
+    /// Rows need the machine itself, not just its name: whether it is remote
+    /// changes what "reveal" can honestly claim to have done.
+    private var machines: [MachineID: Machine] {
         Dictionary(
-            fleet.snapshot.machines.map { ($0.machine.id, $0.machine.displayName) },
+            fleet.snapshot.machines.map { ($0.machine.id, $0.machine) },
             uniquingKeysWith: { first, _ in first }
         )
     }
@@ -35,7 +36,7 @@ struct PanelView: View {
                                 GroupSection(
                                     title: group.title,
                                     agents: agents,
-                                    machineNames: machineNames,
+                                    machines: machines,
                                     now: now,
                                     fleet: fleet
                                 )
@@ -143,7 +144,7 @@ struct PanelView: View {
 private struct GroupSection: View {
     let title: String
     let agents: [Agent]
-    let machineNames: [MachineID: String]
+    let machines: [MachineID: Machine]
     let now: Date
     let fleet: FleetStore
 
@@ -158,7 +159,7 @@ private struct GroupSection: View {
             ForEach(agents) { agent in
                 AgentRow(
                     agent: agent,
-                    machineName: machineNames[agent.ref.machine] ?? String(agent.ref.machine.raw.prefix(8)),
+                    machine: machines[agent.ref.machine],
                     now: now,
                     fleet: fleet
                 )
@@ -170,13 +171,16 @@ private struct GroupSection: View {
 
 private struct AgentRow: View {
     let agent: Agent
-    let machineName: String
+    let machine: Machine?
     let now: Date
     let fleet: FleetStore
 
     @State private var isSending = false
     @State private var isNudging = false
     @State private var nudge = ""
+    /// Text staged by Send and awaiting Confirm.
+    @State private var pendingNudge: String?
+    @State private var revealNote: String?
     @State private var failure: String?
 
     var body: some View {
@@ -269,7 +273,14 @@ private struct AgentRow: View {
                 if available.canNudge {
                     ActionButton(title: "Nudge", tint: Brand.secondaryText) {
                         isNudging.toggle()
+                        pendingNudge = nil
                     }
+                }
+                if available.canReveal {
+                    // The row's one dependable action. Approve is missing on
+                    // most prompts because most name no key, so without this
+                    // a blocked row can offer nothing but Decline.
+                    ActionButton(title: revealTitle, tint: Brand.secondaryText) { reveal() }
                 }
                 Spacer(minLength: 0)
                 if isSending {
@@ -284,14 +295,41 @@ private struct AgentRow: View {
             .disabled(isSending)
 
             if isNudging {
-                HStack(spacing: 6) {
-                    TextField("Tell it what to do", text: $nudge)
-                        .textFieldStyle(.roundedBorder)
+                if let pending = pendingNudge {
+                    // Named, because the risk is not a typo — it is this text
+                    // going to the wrong row. The panel is a list of similar
+                    // rows and the buttons sit in the same place on each.
+                    HStack(spacing: 6) {
+                        Text("Send to \(agent.provider) on \(machineName)?")
+                            .font(Brand.sectionLabel)
+                            .foregroundStyle(Brand.secondaryText)
+                        ActionButton(title: "Confirm", tint: Brand.accent) {
+                            pendingNudge = nil
+                            isNudging = false
+                            nudge = ""
+                            run(.nudge(pending))
+                        }
+                        ActionButton(title: "Cancel", tint: Brand.secondaryText) {
+                            pendingNudge = nil
+                        }
+                        Spacer(minLength: 0)
+                    }
+                    .padding(.top, 2)
+                    Text(pending)
                         .font(Brand.body)
-                        .onSubmit { submitNudge() }
-                    ActionButton(title: "Send", tint: Brand.accent) { submitNudge() }
+                        .foregroundStyle(Brand.secondaryText)
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
+                } else {
+                    HStack(spacing: 6) {
+                        TextField("Tell it what to do", text: $nudge)
+                            .textFieldStyle(.roundedBorder)
+                            .font(Brand.body)
+                            .onSubmit { submitNudge() }
+                        ActionButton(title: "Send", tint: Brand.accent) { submitNudge() }
+                    }
+                    .padding(.top, 2)
                 }
-                .padding(.top, 2)
             }
 
             // Shown in place, next to the button that failed, and left up until
@@ -303,20 +341,74 @@ private struct AgentRow: View {
                     .foregroundStyle(Brand.machineDown)
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.top, 1)
+            } else if let revealNote {
+                Text(revealNote)
+                    .font(Brand.sectionLabel)
+                    .foregroundStyle(Brand.secondaryText)
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.top, 1)
             }
         }
     }
 
+    /// Stages the text rather than sending it. See the confirm row above.
     private func submitNudge() {
-        let text = nudge
-        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
-        nudge = ""
-        isNudging = false
-        run(.nudge(text))
+        let text = nudge.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return }
+        pendingNudge = text
+    }
+
+    private var machineName: String {
+        machine?.displayName ?? String(agent.ref.machine.raw.prefix(8))
+    }
+
+    private var isRemote: Bool { machine?.transport.isRemote ?? false }
+
+    /// How the user gets to a remote machine's herdr from here. herdr attaches
+    /// over SSH itself, so this is its command, not a raw ssh line.
+    private var attachCommand: String? {
+        guard case .ssh(let destination, _, let session, _) = machine?.transport else { return nil }
+        return session == "default" || session.isEmpty
+            ? "herdr --remote \(destination)"
+            : "herdr --remote \(destination) --session \(session)"
+    }
+
+    private var revealTitle: String {
+        // Says where, because on a remote machine focusing a pane changes
+        // something the user is not currently looking at.
+        isRemote ? "Reveal on \(machineName)" : "Reveal"
+    }
+
+    private func reveal() {
+        failure = nil
+        isSending = true
+        Task {
+            do {
+                try await fleet.perform(.reveal, on: agent.ref)
+                if let command = attachCommand {
+                    // Focusing a pane on another machine is real but invisible
+                    // from here, so hand over the command that gets the user
+                    // there. Saying so is the point; a silent copy is a button
+                    // that appears to do nothing.
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(command, forType: .string)
+                    revealNote = "Focused it there. Copied: \(command)"
+                } else {
+                    revealNote = "Focused it in herdr."
+                }
+            } catch let error as InterventionError {
+                failure = error.summary
+            } catch {
+                failure = String(describing: error)
+            }
+            isSending = false
+        }
     }
 
     private func run(_ intervention: Intervention) {
         failure = nil
+        revealNote = nil
         isSending = true
         Task {
             do {

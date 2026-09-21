@@ -15,8 +15,12 @@ private actor RecordingClient: HerdrClient {
         var keys: [(pane: String, keys: [String])] = []
         var prompts: [(pane: String, text: String)] = []
         var interrupts: [String] = []
+        var focused: [String] = []
         var texts: [(pane: String, text: String)] = []
 
+        /// Reveal is excluded on purpose: it sends nothing to the agent, so a
+        /// focus call is not "something was sent" in the sense the guard
+        /// promises. Tests that assert a refusal sent nothing still hold.
         var isEmpty: Bool {
             keys.isEmpty && prompts.isEmpty && interrupts.isEmpty && texts.isEmpty
         }
@@ -25,6 +29,7 @@ private actor RecordingClient: HerdrClient {
             lhs.keys.map(\.keys) == rhs.keys.map(\.keys)
                 && lhs.prompts.map(\.text) == rhs.prompts.map(\.text)
                 && lhs.interrupts == rhs.interrupts
+                && lhs.focused == rhs.focused
                 && lhs.texts.map(\.text) == rhs.texts.map(\.text)
         }
     }
@@ -94,6 +99,9 @@ private actor RecordingClient: HerdrClient {
     }
     func interrupt(paneId: String) async throws {
         sent.interrupts.append(paneId)
+    }
+    func focusPane(paneId: String) async throws {
+        sent.focused.append(paneId)
     }
 }
 
@@ -282,6 +290,40 @@ struct InterventionGuardTests {
 
         try await session.perform(.interrupt, on: AgentID(Self.paneId))
         #expect(await client.sent.interrupts == [Self.paneId])
+    }
+
+    @Test("reveal works on an agent that has moved on")
+    func revealIgnoresStaleness() async throws {
+        // The one action with no staleness guard, because it sends nothing to
+        // the agent. Refusing it would block looking at the pane at exactly
+        // the moment the panel and reality disagree — which is when looking
+        // is most useful.
+        let client = makeClient(seq: 100)
+        let session = await session(client: client)
+        await client.setLiveAgent(Self.paneId, to: info(status: "working", seq: 400))
+
+        try await session.perform(.reveal, on: AgentID(Self.paneId))
+
+        let sent = await client.sent
+        #expect(sent.focused == [Self.paneId])
+        // Still nothing sent *to the agent*.
+        #expect(sent.isEmpty)
+    }
+
+    @Test("reveal is offered on every live row, including ones with no approve key")
+    func revealIsAlwaysOffered() async throws {
+        let client = makeClient(
+            output: "Do you want to continue?\n  ❯ Yes\nenter to confirm · esc to cancel"
+        )
+        let session = await session(client: client)
+        let agent = try #require(await session.view().agents.first)
+
+        // The row that can offer nothing else can still offer this.
+        #expect(agent.actions.approveKey == nil)
+        #expect(agent.actions.canReveal)
+
+        try await session.perform(.reveal, on: AgentID(Self.paneId))
+        #expect(await client.sent.focused == [Self.paneId])
     }
 
     @Test("interrupt still refuses an agent that already moved")

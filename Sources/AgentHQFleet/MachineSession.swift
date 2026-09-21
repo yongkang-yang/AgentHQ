@@ -200,6 +200,13 @@ public actor MachineSession {
             try await verifyUnmoved(agent, using: client)
             try await send { try await client.interrupt(paneId: agentId.raw) }
 
+        case .reveal:
+            // No stamp check, and no prompt check. This is the one action that
+            // sends nothing to the agent: focusing a pane that has moved on
+            // shows the user what is actually there, which is the point. A
+            // guard here would refuse precisely when looking is most useful.
+            try await send { try await client.focusPane(paneId: agentId.raw) }
+
         case .nudge(let text):
             let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !trimmed.isEmpty else { throw InterventionError.notOffered }

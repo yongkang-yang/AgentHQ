@@ -21,6 +21,15 @@ public enum Intervention: Sendable, Equatable {
 
     /// Hand the agent a new instruction.
     case nudge(String)
+
+    /// Bring the agent's pane to the front in its own herdr.
+    ///
+    /// The only action that sends nothing to the agent, which is why it is the
+    /// one that is always truthful. It exists because Approve usually cannot
+    /// be: most prompts are highlighted-row menus that name no key, and a
+    /// triage panel whose main action is generally missing is not much of a
+    /// panel. "Go look at it" always works.
+    case reveal
 }
 
 // MARK: - AgentActions
@@ -59,16 +68,22 @@ public struct AgentActions: Sendable, Equatable {
     /// rather than shown and then failing.
     public var canNudge: Bool
 
+    /// Focusing the pane. True whenever there is a pane to focus, which is
+    /// every live agent — so this is the row's one dependable action.
+    public var canReveal: Bool
+
     public init(
         approveKey: String? = nil,
         denyKey: String? = nil,
         canInterrupt: Bool = false,
-        canNudge: Bool = false
+        canNudge: Bool = false,
+        canReveal: Bool = false
     ) {
         self.approveKey = approveKey
         self.denyKey = denyKey
         self.canInterrupt = canInterrupt
         self.canNudge = canNudge
+        self.canReveal = canReveal
     }
 
     public static let none = AgentActions()
@@ -79,6 +94,7 @@ public struct AgentActions: Sendable, Equatable {
         case .deny:      return denyKey != nil
         case .interrupt: return canInterrupt
         case .nudge:     return canNudge
+        case .reveal:    return canReveal
         }
     }
 }

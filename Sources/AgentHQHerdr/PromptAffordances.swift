@@ -156,16 +156,17 @@ public extension PromptAffordances {
                 approveKey: keys.approve,
                 denyKey: keys.deny,
                 canInterrupt: true,
-                canNudge: false
+                canNudge: false,
+                canReveal: true
             )
 
         case .working:
-            return AgentActions(canInterrupt: true, canNudge: true)
+            return AgentActions(canInterrupt: true, canNudge: true, canReveal: true)
 
         case .rateLimited, .ciFailed, .mergeConflict, .finished, .unknown:
             // Stopped but alive. There is nothing to answer, and a new
             // instruction is the useful thing to send.
-            return AgentActions(canInterrupt: true, canNudge: true)
+            return AgentActions(canInterrupt: true, canNudge: true, canReveal: true)
 
         case .crashed:
             // The process is gone. Every one of these would be sent into a

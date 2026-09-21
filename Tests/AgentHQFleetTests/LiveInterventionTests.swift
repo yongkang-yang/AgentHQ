@@ -159,6 +159,26 @@ struct LiveInterventionTests {
         }
     }
 
+    @Test("reveal focuses the pane in real herdr")
+    func revealFocusesForReal() async throws {
+        try await withFabricatedBlockedAgent { harness, paneId, session in
+            // The throwaway workspace is not the focused one — the user's is.
+            let before = try harness.call("session.snapshot")
+            let snapBefore = before["snapshot"] as? [String: Any] ?? [:]
+            #expect(snapBefore["focused_pane_id"] as? String != paneId)
+
+            try await session.perform(.reveal, on: AgentID(paneId))
+            try await Task.sleep(for: .milliseconds(400))
+
+            let after = try harness.call("session.snapshot")
+            let snapAfter = after["snapshot"] as? [String: Any] ?? [:]
+            // Both, or the pane is focused on a workspace nobody is showing.
+            #expect(snapAfter["focused_pane_id"] as? String == paneId)
+            #expect(snapAfter["focused_workspace_id"] as? String
+                    == paneId.split(separator: ":").first.map(String.init))
+        }
+    }
+
     @Test("an agent that moved on is refused, and nothing reaches the pane")
     func staleRowIsRefusedAgainstRealHerdr() async throws {
         try await withFabricatedBlockedAgent { harness, paneId, session in
