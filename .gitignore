@@ -1,0 +1,22 @@
+## Swift / SwiftPM
+.build/
+.swiftpm/
+Package.pins
+*.xcodeproj
+*.xcworkspace
+DerivedData/
+
+## Release artifacts
+AgentHQ.app/
+*.dmg
+*.zip
+
+## macOS
+.DS_Store
+
+## Never commit these
+# Forwarded herdr sockets, captured agent output, journals, and anything
+# carrying credentials or unredacted pane text.
+*.sock
+journal/
+*.jsonl

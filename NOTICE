@@ -1,0 +1,66 @@
+AgentHQ
+Copyright (C) 2026 Yongkang Yang
+
+This program is free software: you can redistribute it and/or modify it under
+the terms of the GNU General Public License as published by the Free Software
+Foundation, either version 3 of the License, or (at your option) any later
+version. See LICENSE for the full text.
+
+
+THIRD-PARTY MATERIAL
+====================
+
+Shepherd / herdr-manager
+------------------------
+https://github.com/sxp4931/herdr-manager
+Copyright (c) Shyam Pandya
+Licensed under the MIT License.
+
+AgentHQ is an independent implementation, not a fork. Parts of it are ported
+from Shepherd, which is MIT-licensed and therefore may be incorporated into
+this GPL-3.0 work. Every ported file carries the MIT copyright notice at the
+top, as the MIT License requires, and that notice continues to apply to the
+ported material.
+
+Ported or adapted from Shepherd:
+
+  Sources/AgentHQTransport/LocalSocketTransport.swift
+      herdr socket path resolution order.
+
+Planned ports, recorded here so provenance is tracked from the start rather
+than reconstructed later:
+
+  NDJSON client              unix socket framing and I/O timeouts
+  herdr adapter              wire protocol decoding; the two-socket design
+                             separating request/response from the event stream
+  Secret redaction           redaction of credentials in pane output
+  JSONL line reader          incremental line reading
+  Design token layer         DESIGN.md and its token vocabulary
+  build-app.sh, build-dmg.sh bundle, sign, and disk-image scripts
+
+The MIT License text for the above:
+
+    Permission is hereby granted, free of charge, to any person obtaining a
+    copy of this software and associated documentation files (the "Software"),
+    to deal in the Software without restriction, including without limitation
+    the rights to use, copy, modify, merge, publish, distribute, sublicense,
+    and/or sell copies of the Software, and to permit persons to whom the
+    Software is furnished to do so, subject to the following conditions:
+
+    The above copyright notice and this permission notice shall be included in
+    all copies or substantial portions of the Software.
+
+    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+    IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+    FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
+    THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+    LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+    FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+    DEALINGS IN THE SOFTWARE.
+
+
+herdr
+-----
+https://herdr.dev — https://github.com/herdrdev/herdr
+
+AgentHQ speaks herdr's local socket protocol. No herdr code is included.
