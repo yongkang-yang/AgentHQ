@@ -196,3 +196,37 @@ struct StateClassifierTests {
         #expect(agents.first?.workspace == "repo")
     }
 }
+
+@Suite("how far back the classifier looks")
+struct ClassifierRegionTests {
+    private let classifier = StateClassifier()
+
+    @Test("the window is counted in non-empty lines, not raw ones")
+    func blankPaddingDoesNotConsumeTheWindow() {
+        // A boxed dialog is mostly blank padding. Counting raw lines would let
+        // padding push the real prompt out of the window.
+        let padded = "CONFLICT (content): Merge conflict in a.txt"
+            + String(repeating: "\n", count: 30)
+        #expect(classifier.classify(status: "done", recentOutput: padded).state == .mergeConflict)
+    }
+
+    @Test("output well above the window cannot reach in")
+    func widthIsBounded() {
+        // The failure that actually bit was width: prose further up mentioning
+        // a state name was read as that state.
+        let old = "Error: 429 Too Many Requests\n"
+            + (1...20).map { "line \($0)" }.joined(separator: "\n")
+            + "\nDone. All clean."
+        #expect(classifier.classify(status: "done", recentOutput: old).state == .finished)
+    }
+
+    @Test("the window is no wider than herdr's own widest bounded region")
+    func sizedAgainstHerdrsRules() {
+        // herdr scopes its rules to bottom_non_empty_lines(n), most commonly 8
+        // and at most 20. Ours sits between, and must not drift past 20 without
+        // a reason — that is how a classifier starts reading a transcript
+        // instead of a state.
+        #expect(StateClassifier.tailLines <= 20)
+        #expect(StateClassifier.tailLines >= 8)
+    }
+}

@@ -29,9 +29,21 @@ public struct Classification: Sendable, Equatable {
 ///   check is a state they cannot act on, so each match quotes the line that
 ///   produced it.
 public struct StateClassifier: Sendable {
-    /// How much of the tail to consider. Enough to cover a multi-line prompt
-    /// or a test summary, short enough that older output cannot reach in.
-    public static let tailLines = 40
+    /// How much of the tail to consider, counted in **non-empty** lines.
+    ///
+    /// Sized against herdr's own rules, which scope to
+    /// `bottom_non_empty_lines(n)` with 8 the most common and 20 the widest.
+    /// This sat at 40 *raw* lines, which is both wider than any of them and
+    /// inconsistent with `PromptAffordances`, which already counted 14
+    /// non-empty. Raw lines are the wrong unit: a boxed dialog is mostly blank
+    /// padding, so 40 raw lines can be a handful of real ones — or, in a dense
+    /// transcript, far more context than the agent's current state occupies.
+    ///
+    /// Width is the failure mode that actually bit: the classifier reported a
+    /// pane as rate limited because prose further up mentioned the word.
+    /// Narrower is the fix, and it costs only the ability to see a test
+    /// summary that has already scrolled well past.
+    public static let tailLines = 12
 
     public init() {}
 
@@ -210,8 +222,10 @@ public struct StateClassifier: Sendable {
     }
 
     static func tail(of output: String) -> [String] {
-        let cleaned = strippingANSI(output)
-        let lines = cleaned.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+        let lines = strippingANSI(output)
+            .split(separator: "\n", omittingEmptySubsequences: false)
+            .map { condense(String($0)) }
+            .filter { !$0.isEmpty }
         return Array(lines.suffix(tailLines))
     }
 

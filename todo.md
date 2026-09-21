@@ -27,12 +27,12 @@ Milestone 7 (interventions) is committed, with tests. 116 tests green.
   finding, and the rule against provider-keyed answer tables.
 - **`README.md`** milestone list is current.
 
-Still not done from that list:
-
-- **A live intervention test.** The guard is covered against a fake; nothing
-  drives a real blocked agent end to end. `pane.report_agent` can fabricate a
-  blocked agent on a throwaway pane without involving a real one, which is how
-  the protocol findings above were measured.
+- **A live intervention test** — done. Drives a fabricated blocked agent over
+  the real socket and asserts the keystroke lands in the pane, and that a
+  refused one leaves it byte-identical. It caught a real disagreement on its
+  first run: `PromptAffordances` found cursor's `(y)` while `StateClassifier`
+  matched none of its phrase rules, so the row said "needs input" and offered
+  an Approve button. The classifier now consults the affordances.
 
 ## Then milestone 8
 
@@ -47,15 +47,45 @@ Two things found while building milestone 7 that belong to it:
 - **`server.agent_manifests` lists every agent herdr can detect** (21 of them,
   remotely updated). A machines UI can say what a host is capable of seeing.
 
+## Decided: `StateClassifier` does not defer to `agent.explain`
+
+Measured rather than argued, against herdr 0.9.0, by fabricating each case in a
+throwaway pane and asking `agent.explain`:
+
+| pane shows | herdr's state | its matched rule |
+| --- | --- | --- |
+| cursor's approval prompt | `blocked` | `approval_prompt` |
+| an open question | `idle` | none |
+| a merge conflict | `idle` | none |
+| a 429 and a retry-after | `idle` | none |
+
+herdr models none of the three states that are ours — conflict, failed run,
+rate limit all come back `idle`, because it has no rules for them. So explain
+could never replace the classifier; at most it could second-opinion the
+blocked/approval half.
+
+And that half is already better served. herdr's rule-derived state arrives free
+in `agent_status` on every snapshot, so explain's only marginal contribution is
+the rule id. Meanwhile approval is now decided by whether the prompt names a key
+to say yes with, which is strictly more useful than a boolean: it also says
+*which key*, which is what the button has to send. Adding explain would cost one
+more round trip per stopped pane — ~115ms each across a tunnel — to learn less
+than we already have.
+
+Kept as the upgrade path if approval detection turns out wrong in practice:
+`explain.matched_rule` is maintained by someone else, remotely updated, and
+scoped per agent.
+
+**What the measurement did change:** herdr scopes its rules to
+`bottom_non_empty_lines(n)`, most often 8 and at most 20. The classifier was
+reading 40 *raw* lines — wider than any of herdr's, in the wrong unit, and
+inconsistent with `PromptAffordances`, which already counted 14 non-empty.
+Width was the failure that actually bit, when prose further up mentioning
+"rateLimited" was read as a rate limit. Now 12 non-empty, with a test asserting
+it cannot drift past herdr's own widest.
+
 ## Open questions, not yet decided
 
-- **Should `StateClassifier` defer to `agent.explain`?** herdr already
-  classifies with per-agent manifests that are remotely updated, region-scoped,
-  and maintained by someone else. Our hand-rolled regexes are the thing that
-  reported a pane discussing "rateLimited" *as* rate limited. Leaning on
-  `agent.explain` would likely be both more accurate and less code — but it is
-  one round trip per pane, and it reports herdr's four states, so the mapping
-  onto our nine still has to live somewhere. Worth measuring before choosing.
 - **`approveKey` is nil for most agents**, because most prompts are
   highlighted-row menus. That is the honest answer, but it means the Approve
   button rarely appears, and a triage panel where the main action is usually
