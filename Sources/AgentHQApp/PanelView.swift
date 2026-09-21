@@ -10,6 +10,11 @@ struct PanelView: View {
     let fleet: FleetStore
     let notifier: Notifier
     @State private var now = Date()
+    /// What the agent list measured itself to be. See the frame below.
+    @State private var listHeight: CGFloat = 0
+
+    static let minimumListHeight: CGFloat = 96
+    static let maximumListHeight: CGFloat = 460
 
     private let tick = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
 
@@ -28,6 +33,12 @@ struct PanelView: View {
 
             if fleet.snapshot.machines.isEmpty {
                 empty
+            } else if fleet.snapshot.allAgents.isEmpty {
+                Text("No agents running.")
+                    .font(Brand.body)
+                    .foregroundStyle(Brand.secondaryText)
+                    .padding(.vertical, 18)
+                    .frame(maxWidth: .infinity, alignment: .center)
             } else {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 14) {
@@ -45,16 +56,24 @@ struct PanelView: View {
                         }
                     }
                     .padding(.vertical, 12)
+                    // Measure what the list actually wants to be.
+                    .background(
+                        GeometryReader { proxy in
+                            Color.clear.preference(
+                                key: ListHeightKey.self, value: proxy.size.height
+                            )
+                        }
+                    )
                 }
-                .frame(maxHeight: 460)
-
-                if fleet.snapshot.allAgents.isEmpty {
-                    Text("No agents running.")
-                        .font(Brand.body)
-                        .foregroundStyle(Brand.secondaryText)
-                        .padding(.vertical, 18)
-                        .frame(maxWidth: .infinity, alignment: .center)
-                }
+                // An explicit height, not `maxHeight`. A ScrollView inside a
+                // MenuBarExtra window has no height to inherit and no
+                // intrinsic one of its own, so `maxHeight` alone collapsed it
+                // to zero: the panel rendered its header and its footer and
+                // nothing between them, while the header cheerfully said "1
+                // need you". Measured content, floored so a collapse can never
+                // hide the list again, capped so a long herd scrolls.
+                .frame(height: min(max(listHeight, Self.minimumListHeight), Self.maximumListHeight))
+                .onPreferenceChange(ListHeightKey.self) { listHeight = $0 }
             }
 
             Divider()
@@ -489,6 +508,14 @@ private struct AgentRow: View {
             }
             isSending = false
         }
+    }
+}
+
+/// Carries the agent list's measured height up to the frame that applies it.
+private struct ListHeightKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
     }
 }
 
