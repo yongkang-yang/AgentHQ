@@ -10,20 +10,19 @@ struct AgentHQApp: App {
     var body: some Scene {
         MenuBarExtra {
             PanelView(fleet: fleet)
-                .task {
-                    // Before anything connects: an `ssh -N -L` outlives a
-                    // crashed or force-quit AgentHQ, and its leftover socket
-                    // is indistinguishable from a live one.
-                    TunnelReaper.reap()
-
-                    // Machines come from herdr's own registry, so adding one
-                    // there is all the configuration there is.
-                    fleet.importHerdrMachines(
-                        includingLocal: LocalSocketTransport.resolveDefaultSocketPath()
-                    )
-                }
         } label: {
             MenuBarLabel(signal: fleet.signal)
+                // Startup hangs off the label, not the panel and not `init`.
+                // The panel only exists while it is open, so a bar that waited
+                // for it would stay blank until clicked — which is the one
+                // moment the bar is supposed to already know the answer. And
+                // `App.init` runs before SwiftUI installs the @State, so work
+                // started there can act on an instance the views never observe.
+                .task {
+                    fleet.start(
+                        localSocketPath: LocalSocketTransport.resolveDefaultSocketPath()
+                    )
+                }
         }
         .menuBarExtraStyle(.window)
     }

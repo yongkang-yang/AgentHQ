@@ -1,4 +1,5 @@
 import AgentHQKit
+import AgentHQTransport
 import Foundation
 import Observation
 
@@ -12,8 +13,50 @@ public final class FleetStore {
     public private(set) var snapshot: FleetSnapshot = .empty
 
     private var sessions: [MachineID: MachineSession] = [:]
+    private var refreshTask: Task<Void, Never>?
+    private var hasStarted = false
 
     public init() {}
+
+    // MARK: - Lifecycle
+
+    /// Everything the app does at launch, in order. Idempotent: the view that
+    /// calls it can be re-created, and reaping tunnels a second time would
+    /// take down the ones this store just opened.
+    public func start(localSocketPath: String?) {
+        guard !hasStarted else { return }
+        hasStarted = true
+
+        // Before anything connects: an `ssh -N -L` outlives a crashed or
+        // force-quit AgentHQ, and its leftover socket is indistinguishable
+        // from a live one.
+        TunnelReaper.reap()
+        importHerdrMachines(includingLocal: localSocketPath)
+        startRefreshLoop()
+    }
+
+    /// Stop polling. The sessions keep their tunnels; use `remove` to close one.
+    public func stop() {
+        refreshTask?.cancel()
+        refreshTask = nil
+    }
+
+    /// Poll the sessions and rebuild the snapshot.
+    ///
+    /// A poll, not a push, and cheap: each session already holds its own state
+    /// and the network work happens inside it, driven by herdr's events. This
+    /// loop only copies what the sessions already know into the value the
+    /// views read. Without it the panel would render once and never change —
+    /// the sessions would keep updating and nothing would ask them.
+    private func startRefreshLoop(interval: Duration = .milliseconds(1500)) {
+        refreshTask?.cancel()
+        refreshTask = Task { [weak self] in
+            while !Task.isCancelled {
+                await self?.refresh()
+                try? await Task.sleep(for: interval)
+            }
+        }
+    }
 
     public var signal: FleetSignal { snapshot.signal }
 
