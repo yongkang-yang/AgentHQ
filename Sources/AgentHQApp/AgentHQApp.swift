@@ -1,5 +1,6 @@
 import AgentHQFleet
 import AgentHQKit
+import AgentHQTransport
 import SwiftUI
 
 @main
@@ -9,6 +10,13 @@ struct AgentHQApp: App {
     var body: some Scene {
         MenuBarExtra {
             PanelView(fleet: fleet)
+                .task {
+                    // Machines come from herdr's own registry, so adding one
+                    // there is all the configuration there is.
+                    fleet.importHerdrMachines(
+                        includingLocal: LocalSocketTransport.resolveDefaultSocketPath()
+                    )
+                }
         } label: {
             MenuBarLabel(signal: fleet.signal)
         }

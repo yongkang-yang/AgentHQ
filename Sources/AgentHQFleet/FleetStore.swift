@@ -17,6 +17,24 @@ public final class FleetStore {
 
     public var signal: FleetSignal { snapshot.signal }
 
+    /// Adopt every machine herdr already knows about, plus this Mac.
+    ///
+    /// Machines already present are left alone, so this is safe to call again
+    /// after the user adds one in herdr.
+    public func importHerdrMachines(
+        includingLocal localSocketPath: String? = nil
+    ) {
+        if let localSocketPath, !sessions.values.contains(where: { $0.machine.transport.isLocal }) {
+            add(Machine(
+                displayName: "This Mac",
+                transport: .local(socketPath: localSocketPath)
+            ))
+        }
+        for machine in HerdrMachineRegistry.machines() where sessions[machine.id] == nil {
+            add(machine)
+        }
+    }
+
     public func add(_ machine: Machine) {
         let session = MachineSession(machine: machine)
         sessions[machine.id] = session

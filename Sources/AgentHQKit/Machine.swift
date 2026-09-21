@@ -50,8 +50,16 @@ public enum MachineTransport: Sendable, Equatable, Codable {
     ///     that is where key selection, jump hosts, and keepalive settings
     ///     belong, not in this app's settings.
     ///   - port: Non-nil only to override what ssh_config already resolves.
-    ///   - remoteSocketPath: Where herdr's socket lives on the far side.
-    case ssh(destination: String, port: Int?, remoteSocketPath: String)
+    ///   - session: The herdr session name on that host, which decides where
+    ///     its socket lives. `default` is the unnamed session.
+    ///   - remoteSocketPath: Where herdr's socket lives on the far side, when
+    ///     already known. `nil` means resolve it on first connect.
+    ///
+    ///     It has to be resolved rather than written as `~/.config/...`:
+    ///     `ssh -L` does not expand a tilde in the remote half of a forward
+    ///     spec, and fails with no useful message when given one. The remote
+    ///     home is not knowable from here, so it costs one round trip.
+    case ssh(destination: String, port: Int?, session: String, remoteSocketPath: String?)
 
     /// WSL is not a case here on purpose. A WSL distro running its own sshd is
     /// an ordinary `.ssh` destination; routing through Windows sshd and
@@ -61,6 +69,8 @@ public enum MachineTransport: Sendable, Equatable, Codable {
         if case .ssh = self { return true }
         return false
     }
+
+    public var isLocal: Bool { !isRemote }
 }
 
 // MARK: - Machine

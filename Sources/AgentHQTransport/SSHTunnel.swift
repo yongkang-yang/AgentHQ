@@ -15,7 +15,8 @@ public actor SSHTunnel: Transport {
     private let machine: MachineID
     private let destination: String
     private let port: Int?
-    private let remoteSocketPath: String
+    private let session: String
+    private var remoteSocketPath: String?
     private let localSocketPath: String
     private let readinessTimeout: TimeInterval
 
@@ -26,13 +27,15 @@ public actor SSHTunnel: Transport {
         machine: MachineID,
         destination: String,
         port: Int?,
-        remoteSocketPath: String,
+        session: String = "default",
+        remoteSocketPath: String? = nil,
         localSocketPath: String? = nil,
         readinessTimeout: TimeInterval = 20
     ) {
         self.machine = machine
         self.destination = destination
         self.port = port
+        self.session = session
         self.remoteSocketPath = remoteSocketPath
         self.localSocketPath = localSocketPath ?? SocketPath.forwarded(machine: machine)
         self.readinessTimeout = readinessTimeout
@@ -42,6 +45,7 @@ public actor SSHTunnel: Transport {
 
     public func activate() async throws -> String {
         try SocketPath.validate(localSocketPath)
+        let remote = try await resolvedRemoteSocketPath()
 
         if let process, process.isRunning,
            UnixSocketProbe.probe(path: localSocketPath) == .ready {
@@ -50,7 +54,7 @@ public actor SSHTunnel: Transport {
 
         await deactivate()
         try prepareTunnelDirectory()
-        try launch()
+        try launch(remote: remote)
         try await waitUntilReady()
         return localSocketPath
     }
@@ -99,10 +103,26 @@ public actor SSHTunnel: Transport {
         }
     }
 
-    private func launch() throws {
+    /// Resolve the far-side socket once and remember it.
+    private func resolvedRemoteSocketPath() async throws -> String {
+        if let remoteSocketPath { return remoteSocketPath }
+        let configDirectory = try await HerdrSocketLayout.resolveConfigDirectory(
+            destination: destination, port: port
+        )
+        let path = HerdrSocketLayout.socketPath(
+            configDirectory: configDirectory, session: session
+        )
+        remoteSocketPath = path
+        return path
+    }
+
+    private func launch(remote: String) throws {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/ssh")
-        process.arguments = commandArguments
+        process.arguments = Self.arguments(
+            destination: destination, port: port,
+            local: localSocketPath, remote: remote
+        )
         process.standardInput = FileHandle.nullDevice
         process.standardOutput = FileHandle.nullDevice
 
@@ -164,7 +184,7 @@ public actor SSHTunnel: Transport {
                 if consecutiveRefusals >= Self.refusalsBeforeGivingUp {
                     await deactivate()
                     throw TransportError.tunnelLaunchFailed(
-                        reason: "\(destination) accepted the tunnel but nothing is listening on \(remoteSocketPath) — is herdr running there?"
+                        reason: "\(destination) accepted the tunnel but nothing is listening on \(remoteSocketPath ?? "its herdr socket") — is herdr running there?"
                     )
                 }
 
@@ -249,12 +269,14 @@ public actor SSHTunnel: Transport {
         return args
     }
 
-    public nonisolated var commandArguments: [String] {
+    /// The command as it would run with the far-side path already known.
+    /// Only meaningful once resolved; used for diagnostics and tests.
+    public func commandArguments() -> [String] {
         Self.arguments(
             destination: destination,
             port: port,
             local: localSocketPath,
-            remote: remoteSocketPath
+            remote: remoteSocketPath ?? "<unresolved>"
         )
     }
 }
@@ -267,11 +289,12 @@ public extension MachineTransport {
         switch self {
         case .local(let socketPath):
             return LocalSocketTransport(socketPath: socketPath)
-        case .ssh(let destination, let port, let remoteSocketPath):
+        case .ssh(let destination, let port, let session, let remoteSocketPath):
             return SSHTunnel(
                 machine: machine,
                 destination: destination,
                 port: port,
+                session: session,
                 remoteSocketPath: remoteSocketPath
             )
         }

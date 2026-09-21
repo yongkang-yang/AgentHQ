@@ -24,6 +24,7 @@ struct SSHTunnelIntegrationTests {
             machine: .generate(),
             destination: sshHost!,
             port: nil,
+            session: HerdrSocketLayout.defaultSession,
             remoteSocketPath: remote,
             localSocketPath: local,
             readinessTimeout: timeout
@@ -58,6 +59,7 @@ struct SSHTunnelIntegrationTests {
             machine: .generate(),
             destination: "agenthq-no-such-host.invalid",
             port: nil,
+            session: HerdrSocketLayout.defaultSession,
             remoteSocketPath: "/tmp/whatever.sock",
             localSocketPath: "/tmp/agenthq-\(getuid())/itest-nohost.sock",
             readinessTimeout: 12

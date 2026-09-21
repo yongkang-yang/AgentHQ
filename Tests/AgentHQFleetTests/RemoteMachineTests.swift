@@ -1,4 +1,5 @@
 import AgentHQKit
+import AgentHQTransport
 import Foundation
 import Testing
 @testable import AgentHQFleet
@@ -23,7 +24,10 @@ struct RemoteMachineTests {
         transport: .ssh(
             destination: sshHost ?? "",
             port: nil,
-            remoteSocketPath: remoteSocket ?? ""
+            session: HerdrSocketLayout.defaultSession,
+            // Explicit here so the test exercises the tunnel without also
+            // depending on remote-path resolution; resolution has its own test.
+            remoteSocketPath: remoteSocket
         )
     )
 
@@ -73,5 +77,48 @@ struct RemoteMachineTests {
         let machineIds = Set(snapshot.allAgents.map(\.ref.machine))
         #expect(machineIds.count <= 2)
         #expect(snapshot.signal.unreachableMachineCount == 0)
+    }
+}
+
+/// Import the user's real herdr registry and connect to what it describes,
+/// resolving the remote socket path rather than being told it.
+///
+///     AGENTHQ_USE_HERDR_REGISTRY=1 swift test
+@Suite(
+    "herdr registry, end to end",
+    .enabled(if: ProcessInfo.processInfo.environment["AGENTHQ_USE_HERDR_REGISTRY"] != nil,
+             "set AGENTHQ_USE_HERDR_REGISTRY to run")
+)
+struct HerdrRegistryEndToEndTests {
+    @Test("a machine added in herdr connects with no AgentHQ configuration")
+    func registryMachineConnects() async throws {
+        let machines = HerdrMachineRegistry.machines()
+        try #require(!machines.isEmpty, "no machines in herdr's registry")
+
+        let firstEnabled = machines.first { $0.isEnabled }
+        let enabled = try #require(firstEnabled, "no enabled machine in herdr's registry")
+
+        // Nothing told AgentHQ where the remote socket is: `remoteSocketPath`
+        // is nil in the registry import, so connecting has to resolve the far
+        // side's config directory first.
+        guard case .ssh(_, _, _, let remote) = enabled.transport else {
+            Issue.record("expected an ssh transport")
+            return
+        }
+        #expect(remote == nil)
+
+        let session = MachineSession(machine: enabled)
+        await session.start()
+        defer { Task { await session.stop() } }
+
+        let view = await session.view()
+        if case .unreachable(let reason) = view.reachability {
+            Issue.record("\(enabled.displayName) unreachable: \(reason)")
+            return
+        }
+        #expect(view.reachability == .connected)
+        for agent in view.agents {
+            #expect(agent.ref.machine == enabled.id)
+        }
     }
 }
