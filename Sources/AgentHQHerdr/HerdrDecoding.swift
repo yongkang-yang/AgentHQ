@@ -42,41 +42,56 @@ extension LiveHerdrClient {
         )
     }
 
-    /// One pushed event. Unrecognized types are dropped rather than guessed at.
+    /// One pushed event.
+    ///
+    /// The wire shape is `{"event": "<name>", "data": {...}}` — not the
+    /// JSON-RPC `result`/`params` envelope a request reply uses. And the names
+    /// are snake_case (`pane_updated`) even though a *subscription* asks for
+    /// them dotted (`pane.updated`). Reading the reply envelope, or matching
+    /// the dotted name, silently drops every event: the subscription connects,
+    /// the panel renders once, and then never changes again.
     static func decodeEvent(_ line: Data) -> HerdrEvent? {
         guard
-            let object = try? JSONSerialization.jsonObject(with: line) as? [String: Any],
-            let body = (object["result"] ?? object["params"]) as? [String: Any],
-            let type = body["type"] as? String
+            let object = try? JSONSerialization.jsonObject(with: line) as? [String: Any]
         else { return nil }
 
-        switch type {
-        case "pane.updated", "pane.created", "pane.agent_detected", "pane.focused":
-            guard let pane = body["pane"] as? [String: Any] ?? paneFrom(body),
+        // A subscription ack arrives on the same connection as the events.
+        if let result = object["result"] as? [String: Any],
+           result["type"] as? String == "subscription_started" {
+            return .connected
+        }
+
+        let data = object["data"] as? [String: Any] ?? [:]
+        guard let name = object["event"] as? String ?? data["type"] as? String else {
+            return nil
+        }
+
+        switch name {
+        case "pane_updated", "pane_created", "pane_agent_detected":
+            // `data.pane` carries the full pane record, identical to the one
+            // in a snapshot, so these patch in place instead of forcing a
+            // resnapshot per event.
+            guard let pane = data["pane"] as? [String: Any],
                   let decoded = decodePane(pane) else { return nil }
             return .paneUpdated(decoded)
 
-        case "pane.closed", "pane.exited":
-            guard let paneId = body["pane_id"] as? String else { return nil }
+        case "pane_closed", "pane_exited":
+            guard let paneId = data["pane_id"] as? String
+                ?? (data["pane"] as? [String: Any])?["pane_id"] as? String
+            else { return nil }
             return .paneClosed(paneId: paneId)
 
-        case "subscription_started":
-            return .connected
-
         default:
-            // Workspace, tab, worktree and layout events change labels, not
-            // agent state. Resnapshot rather than patch — reconstructing a
-            // rename from an event is how label maps drift out of sync.
-            if type.hasPrefix("workspace.") || type.hasPrefix("tab.")
-                || type.hasPrefix("worktree.") || type.hasPrefix("pane.moved") {
+            // Workspace, tab, worktree and focus events change labels and
+            // topology, not agent state, and do not carry a pane. Resnapshot
+            // rather than patch — reconstructing a rename from an event is how
+            // label maps drift out of sync.
+            if name.hasPrefix("workspace_") || name.hasPrefix("tab_")
+                || name.hasPrefix("worktree_") || name.hasPrefix("pane_") {
                 return .topologyChanged
             }
             return nil
         }
     }
 
-    /// Some pane events inline the pane's fields instead of nesting them.
-    private static func paneFrom(_ body: [String: Any]) -> [String: Any]? {
-        body["pane_id"] is String ? body : nil
-    }
 }

@@ -19,6 +19,9 @@ public actor MachineSession {
     private var reachability: MachineReachability
     private var agents: [Agent] = []
     private var herdrVersion: String?
+    /// workspaceId -> label, from the last snapshot. A `pane_updated` event
+    /// carries ids but not labels, so patching one in place needs this.
+    private var workspaceNames: [String: String] = [:]
 
     public init(machine: Machine) {
         self.machine = machine
@@ -74,6 +77,7 @@ public actor MachineSession {
     public func resync() async throws {
         guard let client else { return }
         let snapshot = try await client.snapshot()
+        workspaceNames = snapshot.workspaceNames
         agents = reconcile(snapshot.agents(on: machine.id))
     }
 
@@ -104,15 +108,55 @@ public actor MachineSession {
 
     private func apply(_ event: HerdrEvent) async {
         switch event {
-        case .paneUpdated, .paneClosed, .topologyChanged:
-            // Patch-in-place would need every event to carry every field it
-            // touches, and protocol 22's pane events do not. Resnapshotting is
-            // cheap here — one request, one connection — and cannot drift.
+        case .paneUpdated(let pane):
+            // `data.pane` is the full pane record, so this patches in place.
+            // Resnapshotting per event would cost a round trip each time —
+            // ~115ms to a machine across an ssh tunnel — and a chatty agent
+            // emits these continuously.
+            patch(pane)
+
+        case .paneClosed(let paneId):
+            agents.removeAll { $0.ref.agent.raw == paneId }
+
+        case .topologyChanged:
+            // Labels moved. These events carry no pane, and rebuilding a
+            // rename from them is how label maps drift out of sync.
             try? await resync()
+
         case .connected:
             reachability = .connected
+
         case .disconnected:
             reachability = .reconnecting(attempt: 1)
+        }
+    }
+
+    /// Apply one pane to the agent list, preserving dwell when the state has
+    /// not actually changed.
+    private func patch(_ pane: HerdrPane) {
+        let incoming = HerdrSnapshot(
+            herdrVersion: herdrVersion ?? "",
+            protocolVersion: 0,
+            panes: [pane],
+            workspaceNames: workspaceNames
+        ).agents(on: machine.id)
+
+        // A pane that stopped being an agent — the agent exited but the shell
+        // lives on — drops out of the list rather than freezing on its last
+        // state.
+        guard let agent = incoming.first else {
+            agents.removeAll { $0.ref.agent.raw == pane.paneId }
+            return
+        }
+
+        if let index = agents.firstIndex(where: { $0.ref == agent.ref }) {
+            var updated = agent
+            if agents[index].state == agent.state {
+                updated.stateEnteredAt = agents[index].stateEnteredAt
+            }
+            agents[index] = updated
+        } else {
+            agents.append(agent)
         }
     }
 }

@@ -130,6 +130,7 @@ public actor SSHTunnel: Transport {
     private func waitUntilReady() async throws {
         let deadline = Date().addingTimeInterval(readinessTimeout)
         var consecutiveRefusals = 0
+        var consecutiveReady = 0
 
         while Date() < deadline {
             if let process, !process.isRunning {
@@ -140,7 +141,16 @@ public actor SSHTunnel: Transport {
 
             switch UnixSocketProbe.probe(path: localSocketPath) {
             case .ready:
-                return
+                // One ready is not enough. In the moment just after ssh binds
+                // the socket it will accept a connection and hold it while the
+                // channel is still being set up, so a peek sees an open
+                // connection with no data — indistinguishable from a healthy
+                // idle herdr. Measured: the probe taken at bind time reported
+                // ready on 1 of 3 runs against a deliberately dead forward,
+                // while every later probe correctly reported a hangup.
+                consecutiveReady += 1
+                consecutiveRefusals = 0
+                if consecutiveReady >= Self.requiredConsecutiveReady { return }
 
             case .peerClosed:
                 // ssh has bound the socket and is accepting connections, but
@@ -149,6 +159,7 @@ public actor SSHTunnel: Transport {
                 // does this, so a short run of these means the answer is no.
                 // Waiting out the full timeout would make "herdr isn't running
                 // over there" take 20s to say.
+                consecutiveReady = 0
                 consecutiveRefusals += 1
                 if consecutiveRefusals >= Self.refusalsBeforeGivingUp {
                     await deactivate()
@@ -161,6 +172,7 @@ public actor SSHTunnel: Transport {
                 // ssh has not bound yet. Expected for the first few hundred
                 // milliseconds; not evidence of anything.
                 consecutiveRefusals = 0
+                consecutiveReady = 0
             }
 
             try? await Task.sleep(for: .milliseconds(150))
@@ -179,6 +191,11 @@ public actor SSHTunnel: Transport {
     /// hanging up — long enough to ride out a herdr that is mid-restart, short
     /// enough that a machine with herdr stopped reports in about a second.
     private static let refusalsBeforeGivingUp = 5
+
+    /// Two readings 150ms apart, so a connection accepted during channel setup
+    /// cannot pass as a working tunnel. Costs one extra poll on the happy path
+    /// against a tunnel that would otherwise be reported up before it is.
+    private static let requiredConsecutiveReady = 2
 
     /// Whatever ssh has complained about so far. Read non-blocking: ssh is
     /// still running in the healthy case and a blocking read would hang.
