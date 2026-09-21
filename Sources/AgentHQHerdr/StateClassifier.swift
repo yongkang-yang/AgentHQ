@@ -65,7 +65,10 @@ public struct StateClassifier: Sendable {
         case "blocked":          return .needsInput
         case "done", "finished": return .finished
         case "exited", "dead":   return .crashed
-        case "idle":             return .finished
+        // herdr reports `idle` and `done` separately and they mean different
+        // things: idle is an agent sitting at its prompt between turns, done
+        // is a run that completed.
+        case "idle":             return .idle
         default:                 return .unknown
         }
     }
@@ -229,19 +232,32 @@ public struct StateClassifier: Sendable {
         return Array(lines.suffix(tailLines))
     }
 
-    /// The last line with something in it, used as a reason when an agent is
-    /// waiting but the prompt matched no rule — better a verbatim quote than
-    /// an invented summary.
+    /// What to quote when an agent is waiting but no rule matched.
+    ///
+    /// Prefers the last line that reads as a question, and only then the last
+    /// line with anything in it. The bare last line is almost always wrong
+    /// here: what sits directly above a terminal's input box is prompt
+    /// furniture — a hint, a key legend, a parenthetical — while the question
+    /// the user has to answer is a line or two further up. A row that quotes
+    /// the furniture instead of the question tells them nothing.
+    ///
+    /// Verbatim either way. A summary of a question is a worse question.
     static func lastMeaningfulLine(_ lines: [String]) -> String? {
-        for line in lines.reversed() {
-            let condensed = condense(line)
-            // Box drawing and prompt furniture carry no information.
-            guard condensed.count > 3,
-                  condensed.contains(where: { $0.isLetter || $0.isNumber })
-            else { continue }
-            return condensed
+        let meaningful = lines
+            .map(condense)
+            .filter { $0.count > 3 && $0.contains(where: { $0.isLetter || $0.isNumber }) }
+
+        if let question = meaningful.last(where: Self.readsAsAQuestion) {
+            return question
         }
-        return nil
+        return meaningful.last
+    }
+
+    static func readsAsAQuestion(_ line: String) -> Bool {
+        // Both marks: agents are asked to work in whatever language the user
+        // writes in, and answer in it too.
+        guard let last = line.last else { return false }
+        return last == "?" || last == "？"
     }
 
     static func condense(_ line: String) -> String {

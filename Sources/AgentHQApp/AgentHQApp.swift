@@ -61,6 +61,7 @@ struct MenuBarLabel: View {
         case .rateLimited:   return "hourglass"
         case .finished:      return "checkmark.circle.fill"
         case .working:       return "circle.fill"
+        case .idle:          return "pause.circle"
         case .unknown:       return "circle.dashed"
         }
     }

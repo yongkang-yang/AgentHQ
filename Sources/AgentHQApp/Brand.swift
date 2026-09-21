@@ -29,7 +29,11 @@ enum Brand {
             return pair(light: 0x1E4BD2, dark: 0x6CA6FF)
         case .working:
             return pair(light: 0x1A3A69, dark: 0x8BADDC)
-        case .unknown:
+        case .idle, .unknown:
+            // One grey for "nothing to act on". Splitting it would be an
+            // eighth hue, and DESIGN.md's own limit is that past about six
+            // they stop being distinguishable at 8pt — the pill label is what
+            // separates these two.
             return pair(light: 0x5F666B, dark: 0x929A9F)
         }
     }
@@ -52,6 +56,7 @@ enum Brand {
         case .mergeConflict: return "merge conflict"
         case .rateLimited:   return "rate limited"
         case .finished:      return "finished"
+        case .idle:          return "idle"
         case .crashed:       return "crashed"
         case .unknown:       return "unknown"
         }
@@ -67,6 +72,7 @@ enum Brand {
         case .rateLimited:   return "hourglass"
         case .finished:      return "checkmark.circle.fill"
         case .working:       return "circle.fill"
+        case .idle:          return "pause.circle"
         case .unknown:       return "circle.dashed"
         }
     }

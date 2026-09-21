@@ -34,6 +34,15 @@ public enum AgentState: String, Sendable, Equatable, CaseIterable, Codable {
     /// Run completed; nothing further is expected.
     case finished
 
+    /// Alive and at its prompt, with nothing running.
+    ///
+    /// Distinct from ``finished``, which herdr also reports separately. An
+    /// agent you have been working with sits here between turns; it has not
+    /// completed anything. Folding the two together filled the Completed
+    /// section with agents that had merely been left open, which is the
+    /// opposite of what an attention-first panel is for.
+    case idle
+
     /// The agent process is gone, or its pane died, while work was in flight.
     /// Distinct from an unreachable machine — see ``MachineReachability``.
     case crashed
@@ -60,6 +69,7 @@ public extension AgentState {
         case .rateLimited:   return 30
         case .finished:      return 20
         case .working:       return 10
+        case .idle:          return 5
         case .unknown:       return 0
         }
     }
@@ -73,7 +83,7 @@ public extension AgentState {
         case .crashed, .needsApproval, .needsInput,
              .mergeConflict, .ciFailed, .rateLimited:
             return true
-        case .working, .finished, .unknown:
+        case .working, .finished, .idle, .unknown:
             return false
         }
     }
@@ -105,6 +115,10 @@ public extension AgentState {
         case .finished:
             return .completed
         case .working:
+            return .working
+        case .idle:
+            // Alive, not doing anything, nothing to act on. Visible but
+            // secondary — not Completed, which would claim work was done.
             return .working
         case .unknown:
             // Secondary but visible. Not `needsYou`: promoting every state we

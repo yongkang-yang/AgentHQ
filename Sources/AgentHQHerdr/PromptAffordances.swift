@@ -167,7 +167,7 @@ public extension PromptAffordances {
         case .working:
             return AgentActions(canInterrupt: true, canNudge: true, canReveal: true)
 
-        case .rateLimited, .ciFailed, .mergeConflict, .finished, .unknown:
+        case .rateLimited, .ciFailed, .mergeConflict, .finished, .idle, .unknown:
             // Stopped but alive. There is nothing to answer, and a new
             // instruction is the useful thing to send.
             return AgentActions(canInterrupt: true, canNudge: true, canReveal: true)

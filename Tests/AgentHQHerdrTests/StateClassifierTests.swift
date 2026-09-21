@@ -21,6 +21,26 @@ struct StateClassifierTests {
         #expect(classify("something-new", nil).state == .unknown)
     }
 
+    @Test("idle is not finished")
+    func idleIsItsOwnState() {
+        // herdr reports these separately and they mean different things: idle
+        // is an agent sitting at its prompt between turns, done is a run that
+        // completed. Conflating them filled the Completed section with agents
+        // that had merely been left open — the opposite of what an
+        // attention-first panel is for.
+        #expect(classify("idle", nil).state == .idle)
+        #expect(classify("done", nil).state == .finished)
+        #expect(classify("finished", nil).state == .finished)
+    }
+
+    @Test("an idle agent is secondary, never presented as completed work")
+    func idleGroupsWithWorking() {
+        #expect(AgentState.idle.group == .working)
+        #expect(!AgentState.idle.needsAttention)
+        // Alive but doing nothing is the least interesting thing on the panel.
+        #expect(AgentState.idle.severity < AgentState.working.severity)
+    }
+
     @Test("blocked without output is the weaker waiting state")
     func blockedDefaultsToNeedsInput() {
         // Claiming needsApproval unseen would put an approve/deny pair in
@@ -69,6 +89,29 @@ struct StateClassifierTests {
         // With no rule matched, the reason is the agent's own last line rather
         // than an invented summary.
         #expect(result.reason == "Which database should I migrate first?")
+    }
+
+    @Test("the reason quotes the question, not the furniture under it")
+    func reasonPrefersTheQuestion() {
+        // Observed in the running app: the row quoted a parenthetical note
+        // sitting above the input box and never showed the question the user
+        // had to answer. What sits directly above a terminal's input is almost
+        // always a hint or a key legend; the question is a line or two up.
+        let pane = "I need a decision before I continue.\n\nWhich database should I migrate first?\n\n  (press enter to send \u{00B7} esc to cancel)"
+        #expect(classify("blocked", pane).reason == "Which database should I migrate first?")
+    }
+
+    @Test("a full-width question mark counts too")
+    func questionMarkIsNotOnlyASCII() {
+        // Agents answer in whatever language they were asked in.
+        let pane = "\u{6211}\u{9700}\u{8981}\u{4E00}\u{4E2A}\u{51B3}\u{5B9A}\u{3002}\n\n\u{5148}\u{8FC1}\u{79FB}\u{54EA}\u{4E2A}\u{6570}\u{636E}\u{5E93}\u{FF1F}\n\n  (press enter)"
+        #expect(classify("blocked", pane).reason == "\u{5148}\u{8FC1}\u{79FB}\u{54EA}\u{4E2A}\u{6570}\u{636E}\u{5E93}\u{FF1F}")
+    }
+
+    @Test("with no question anywhere, the last line is still quoted")
+    func fallsBackToLastLine() {
+        let pane = "Waiting for you.\n\n  type a name and press enter"
+        #expect(classify("blocked", pane).reason == "type a name and press enter")
     }
 
     // MARK: Conflicts and failures

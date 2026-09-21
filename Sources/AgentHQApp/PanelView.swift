@@ -346,7 +346,14 @@ private struct AgentRow: View {
                     }
                 }
                 if available.canInterrupt {
-                    ActionButton(title: "Stop", tint: Brand.machineDown) { run(.interrupt) }
+                    ActionButton(title: "Stop", tint: Brand.machineDown) {
+                        // Says what it sent. Interrupt frequently changes
+                        // nothing the row can show — the agent catches the
+                        // signal and carries on, or herdr has not re-detected
+                        // it yet — and a silent success is indistinguishable
+                        // from a button that does not work.
+                        run(.interrupt, note: "Sent ⌃C.")
+                    }
                 }
                 if available.canReply {
                     // The open question's answer. Approve/Decline cannot
@@ -492,13 +499,14 @@ private struct AgentRow: View {
         }
     }
 
-    private func run(_ intervention: Intervention) {
+    private func run(_ intervention: Intervention, note: String? = nil) {
         failure = nil
         revealNote = nil
         isSending = true
         Task {
             do {
                 try await fleet.perform(intervention, on: agent.ref)
+                revealNote = note
             } catch let error as InterventionError {
                 failure = error.summary
             } catch {
