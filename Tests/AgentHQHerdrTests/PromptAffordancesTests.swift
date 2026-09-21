@@ -204,3 +204,57 @@ struct PromptAffordancesTests {
         #expect(!menu.allows(.nudge("x")))
     }
 }
+
+/// The two halves of the answering path have to agree. One reads the prompt to
+/// decide *what state* the agent is in; the other reads it to decide *which
+/// key* to press. A row that says "needs input" while offering an Approve
+/// button is telling the user two different things about the same prompt.
+@Suite("classifier and affordances agree")
+struct ClassificationAgreementTests {
+    private let classifier = StateClassifier()
+    private let affordances = PromptAffordances()
+
+    private func agree(_ prompt: String) -> Bool {
+        let state = classifier.classify(status: "blocked", recentOutput: prompt).state
+        let hasApproveKey = affordances.affordances(inRecentOutput: prompt).approve != nil
+        // Naming a way to say yes is what makes a prompt an approval.
+        return hasApproveKey ? state == .needsApproval : true
+    }
+
+    @Test("a prompt that names an affirmative key is an approval")
+    func namedKeyMeansApproval() {
+        // cursor's real prompt matches none of the classifier's own phrase
+        // rules, and shipped as needsInput with an Approve button until a live
+        // agent was driven through it.
+        let cursor = "waiting for approval\nrun this command?\n  -> run (once) (y)\n     skip (esc or n)"
+        #expect(classifier.classify(status: "blocked", recentOutput: cursor).state == .needsApproval)
+
+        for prompt in [
+            "waiting for approval\nrun this command?\n  -> run (once) (y)\n     skip (esc or n)",
+            "Allow command execution? [y/n]",
+            "  yes (y)\n  no (n)",
+            "accept edits (y) (enter)",
+            "Do you want to proceed?",
+        ] {
+            #expect(agree(prompt), "\(prompt)")
+        }
+    }
+
+    @Test("a menu naming no affirmative key stays needs-input")
+    func menuStaysNeedsInput() {
+        // Nothing to press, so nothing is claimed. The row offers to decline
+        // and to open the pane, which are both truthful.
+        let menu = "Do you want to allow this?\n  ❯ Yes\n    No\nenter to confirm · esc to cancel"
+        let state = classifier.classify(status: "blocked", recentOutput: menu).state
+        #expect(state == .needsApproval)  // "do you want to allow" is a phrase rule
+        #expect(affordances.affordances(inRecentOutput: menu).approve == nil)
+    }
+
+    @Test("an open question is neither")
+    func openQuestion() {
+        let question = "Which database should I migrate first?"
+        #expect(classifier.classify(status: "blocked", recentOutput: question).state == .needsInput)
+        #expect(affordances.affordances(inRecentOutput: question).approve == nil)
+        #expect(agree(question))
+    }
+}

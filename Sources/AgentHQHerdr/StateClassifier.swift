@@ -87,6 +87,15 @@ public struct StateClassifier: Sendable {
             if let hit = Self.firstMatch(in: tail, among: Self.approvalRules) {
                 return Classification(state: .needsApproval, reason: hit.reason)
             }
+            // A prompt that names a way to say yes *is* an approval, whatever
+            // words it used to ask. Without this the two halves disagree:
+            // cursor's `run (once) (y)` hands PromptAffordances an approve key
+            // while matching none of the rules above, and the row renders as
+            // "needs input" with an Approve button on it. Caught by driving a
+            // real blocked agent rather than by reasoning about the rules.
+            if PromptAffordances().affordances(inRecentOutput: output).approve != nil {
+                return Classification(state: .needsApproval, reason: Self.lastMeaningfulLine(tail))
+            }
             return Classification(state: .needsInput, reason: Self.lastMeaningfulLine(tail))
         }
 
