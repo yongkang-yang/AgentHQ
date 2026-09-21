@@ -28,3 +28,5 @@ journal/
 *.jpg
 *.jpeg
 !docs/**/*.png
+!Resources/**/*.png
+!Resources/*.png

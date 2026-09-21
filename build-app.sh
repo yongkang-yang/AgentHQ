@@ -19,6 +19,10 @@ rm -rf "$APP_DIR"
 mkdir -p "$APP_DIR/Contents/MacOS" "$APP_DIR/Contents/Resources"
 cp "$BINARY" "$APP_DIR/Contents/MacOS/$APP_NAME"
 
+# The icon. LSUIElement means no Dock icon, but this is still what Finder,
+# notifications, the About panel and the disk image show.
+cp Resources/AgentHQ.icns "$APP_DIR/Contents/Resources/AgentHQ.icns"
+
 cat > "$APP_DIR/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -27,6 +31,7 @@ cat > "$APP_DIR/Contents/Info.plist" <<PLIST
     <key>CFBundleExecutable</key><string>$APP_NAME</string>
     <key>CFBundleIdentifier</key><string>dev.yongkang.agenthq</string>
     <key>CFBundleName</key><string>$APP_NAME</string>
+    <key>CFBundleIconFile</key><string>AgentHQ</string>
     <key>CFBundleDisplayName</key><string>$APP_NAME</string>
     <key>CFBundlePackageType</key><string>APPL</string>
     <key>CFBundleShortVersionString</key><string>$VERSION</string>
