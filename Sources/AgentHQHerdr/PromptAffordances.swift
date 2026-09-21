@@ -157,7 +157,11 @@ public extension PromptAffordances {
                 denyKey: keys.deny,
                 canInterrupt: true,
                 canNudge: false,
-                canReveal: true
+                canReveal: true,
+                // Only the open question takes words. An approval prompt's
+                // named keys are its answer, and typing at a highlighted-row
+                // menu goes into a filter or nowhere.
+                canReply: state == .needsInput
             )
 
         case .working:

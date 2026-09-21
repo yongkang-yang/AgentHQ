@@ -91,7 +91,13 @@ struct LiveInterventionTests {
 
     /// Builds a throwaway workspace holding one fabricated blocked agent, runs
     /// `body` against it, and closes the workspace whatever happens.
+    /// An open question, which classifies as needsInput and so offers Reply
+    /// rather than Approve.
+    private static let questionScript =
+        #"clear; printf 'I need a decision.\nWhich database should I migrate first?\n'"#
+
     private func withFabricatedBlockedAgent(
+        showing script: String? = nil,
         _ body: (Harness, String, MachineSession) async throws -> Void
     ) async throws {
         let harness = Harness(socketPath: socketPath!)
@@ -108,7 +114,7 @@ struct LiveInterventionTests {
 
         // Put cursor's prompt on the pane's screen, then tell herdr an agent
         // is sitting blocked in it.
-        try harness.call("pane.send_text", ["pane_id": paneId, "text": Self.promptScript])
+        try harness.call("pane.send_text", ["pane_id": paneId, "text": script ?? Self.promptScript])
         try harness.call("pane.send_keys", ["pane_id": paneId, "keys": ["Enter"]])
         try await Task.sleep(for: .milliseconds(1200))
         try harness.call("pane.report_agent", [
@@ -156,6 +162,52 @@ struct LiveInterventionTests {
             try await Task.sleep(for: .milliseconds(800))
             let after = try screen(harness, paneId)
             #expect(after.contains("y"), "no 'y' reached the pane")
+        }
+    }
+
+    @Test("a typed answer reaches a real blocked agent")
+    func replyReachesThePane() async throws {
+        try await withFabricatedBlockedAgent(showing: Self.questionScript) { harness, paneId, session in
+            let agents = await session.view().agents
+            let agent = try #require(agents.first { $0.ref.agent.raw == paneId })
+
+            // An open question: nothing to press, so words are the only answer.
+            #expect(agent.state == .needsInput)
+            #expect(agent.actions.canReply)
+            #expect(agent.actions.approveKey == nil)
+            // herdr refuses agent.prompt here, which is why reply exists.
+            #expect(!agent.actions.canNudge)
+
+            try await session.perform(.reply("echo THE_STAGING_ONE"), on: AgentID(paneId))
+            try await Task.sleep(for: .milliseconds(1000))
+
+            // Sent *and* submitted: the shell ran it, which it only does on a
+            // newline. A reply that arrives unsubmitted leaves the agent
+            // holding half an instruction.
+            let after = try screen(harness, paneId)
+            #expect(after.contains("THE_STAGING_ONE"), "the reply did not reach the pane")
+        }
+    }
+
+    @Test("a refused reply leaves the pane untouched")
+    func staleReplySendsNothingForReal() async throws {
+        try await withFabricatedBlockedAgent(showing: Self.questionScript) { harness, paneId, session in
+            let before = try screen(harness, paneId)
+
+            try harness.call("pane.report_agent", [
+                "pane_id": paneId, "source": "cursor", "agent": "cursor", "state": "working",
+            ])
+            try await Task.sleep(for: .milliseconds(400))
+
+            await #expect(throws: InterventionError.self) {
+                try await session.perform(.reply("echo SHOULD_NOT_APPEAR"), on: AgentID(paneId))
+            }
+
+            try await Task.sleep(for: .milliseconds(500))
+            let after = try screen(harness, paneId)
+            #expect(!after.contains("SHOULD_NOT_APPEAR"))
+            #expect(after.trimmingCharacters(in: .whitespacesAndNewlines)
+                    == before.trimmingCharacters(in: .whitespacesAndNewlines))
         }
     }
 

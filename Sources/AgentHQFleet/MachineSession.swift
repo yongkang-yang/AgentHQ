@@ -215,6 +215,26 @@ public actor MachineSession {
             guard !trimmed.isEmpty else { throw InterventionError.notOffered }
             try await verifyUnmoved(agent, using: client)
             try await send { try await client.prompt(paneId: agentId.raw, text: trimmed) }
+
+        case .reply(let text):
+            let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { throw InterventionError.notOffered }
+
+            // The stamp check, and nothing more. Approve can re-read the
+            // prompt and confirm it still names the same key; a reply has no
+            // key to re-verify, so an unchanged `state_change_seq` — meaning
+            // this agent has not moved since the row was built — is the whole
+            // guarantee. That is weaker than Approve's, and the reason to say
+            // so here rather than let it read as equivalent.
+            try await verifyUnmoved(agent, using: client)
+
+            // One call, with the newline inside it. Sending the text and then
+            // an Enter separately leaves a failure mode where the words land
+            // and the submit does not, and the agent sits holding half an
+            // instruction in its input.
+            try await send {
+                try await client.sendText(paneId: agentId.raw, text: trimmed + "\n")
+            }
         }
 
         // The row should stop offering what it just did, without waiting for

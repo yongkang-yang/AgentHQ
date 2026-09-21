@@ -292,6 +292,66 @@ struct InterventionGuardTests {
         #expect(await client.sent.interrupts == [Self.paneId])
     }
 
+    // MARK: Reply
+
+    /// An open question, so the row offers Reply rather than Approve.
+    private static let openQuestion = "I need a decision.\nWhich database should I migrate first?"
+
+    @Test("a typed answer is sent as one call, with its own newline")
+    func replySendsOneSubmittedMessage() async throws {
+        let client = makeClient(output: Self.openQuestion)
+        let session = await session(client: client)
+
+        try await session.perform(.reply("the staging one"), on: AgentID(Self.paneId))
+
+        // One call. Sending the text and then an Enter separately leaves a
+        // failure mode where the words land and the submit does not.
+        let sent = await client.sent
+        #expect(sent.texts.map(\.text) == ["the staging one\n"])
+        #expect(sent.keys.isEmpty)
+        // Not agent.prompt: herdr refuses that on a blocked agent.
+        #expect(sent.prompts.isEmpty)
+    }
+
+    @Test("a moved agent refuses a reply and sends nothing")
+    func replyRefusesMovedAgent() async throws {
+        // Worse than a mis-sent keystroke: a whole instruction delivered to
+        // whatever replaced the question.
+        let client = makeClient(seq: 100, output: Self.openQuestion)
+        let session = await session(client: client)
+        await client.setLiveAgent(Self.paneId, to: info(status: "working", seq: 101))
+
+        await #expect(throws: InterventionError.self) {
+            try await session.perform(.reply("the staging one"), on: AgentID(Self.paneId))
+        }
+        #expect(await client.sent.isEmpty)
+    }
+
+    @Test("empty text is refused and sends nothing")
+    func emptyReplyIsRefused() async throws {
+        let client = makeClient(output: Self.openQuestion)
+        let session = await session(client: client)
+
+        for text in ["", "   ", "\n\t "] {
+            await #expect(throws: InterventionError.self) {
+                try await session.perform(.reply(text), on: AgentID(Self.paneId))
+            }
+        }
+        #expect(await client.sent.isEmpty)
+    }
+
+    @Test("a reply is refused on an approval prompt")
+    func replyNotOfferedOnApprovalPrompt() async throws {
+        // The prompt names its keys; typed text is not its answer.
+        let client = makeClient()   // cursor's run/skip prompt
+        let session = await session(client: client)
+
+        await #expect(throws: InterventionError.self) {
+            try await session.perform(.reply("yes please"), on: AgentID(Self.paneId))
+        }
+        #expect(await client.sent.isEmpty)
+    }
+
     @Test("reveal works on an agent that has moved on")
     func revealIgnoresStaleness() async throws {
         // The one action with no staleness guard, because it sends nothing to

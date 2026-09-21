@@ -19,8 +19,18 @@ public enum Intervention: Sendable, Equatable {
     /// Stop whatever the agent is doing, without answering anything.
     case interrupt
 
-    /// Hand the agent a new instruction.
+    /// Hand the agent a new instruction while it is working.
     case nudge(String)
+
+    /// Answer the question a blocked agent is asking, in words.
+    ///
+    /// Distinct from ``nudge`` and deliberately not sharing a button with it.
+    /// Nudge interrupts an agent that is working and travels `agent.prompt`;
+    /// reply answers one that is waiting, and cannot travel `agent.prompt` at
+    /// all — herdr refuses it on a blocked agent with `agent_blocked`. One
+    /// control doing both would send text down a path herdr rejects half the
+    /// time.
+    case reply(String)
 
     /// Bring the agent's pane to the front in its own herdr.
     ///
@@ -72,18 +82,29 @@ public struct AgentActions: Sendable, Equatable {
     /// every live agent — so this is the row's one dependable action.
     public var canReveal: Bool
 
+    /// Typing an answer. True only for ``AgentState/needsInput``.
+    ///
+    /// Not offered on `needsApproval`, even though that agent is equally
+    /// blocked. An approval prompt is a bounded choice — often a
+    /// highlighted-row menu, where typed text goes into a filter or nowhere —
+    /// and its named keys *are* the answer. A Reply box there would be a
+    /// control that looks like it works and usually does not.
+    public var canReply: Bool
+
     public init(
         approveKey: String? = nil,
         denyKey: String? = nil,
         canInterrupt: Bool = false,
         canNudge: Bool = false,
-        canReveal: Bool = false
+        canReveal: Bool = false,
+        canReply: Bool = false
     ) {
         self.approveKey = approveKey
         self.denyKey = denyKey
         self.canInterrupt = canInterrupt
         self.canNudge = canNudge
         self.canReveal = canReveal
+        self.canReply = canReply
     }
 
     public static let none = AgentActions()
@@ -95,6 +116,7 @@ public struct AgentActions: Sendable, Equatable {
         case .interrupt: return canInterrupt
         case .nudge:     return canNudge
         case .reveal:    return canReveal
+        case .reply:     return canReply
         }
     }
 }

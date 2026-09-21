@@ -232,10 +232,13 @@ private struct AgentRow: View {
     let fleet: FleetStore
 
     @State private var isSending = false
-    @State private var isNudging = false
-    @State private var nudge = ""
+    @State private var compose = ""
     /// Text staged by Send and awaiting Confirm.
-    @State private var pendingNudge: String?
+    @State private var pendingCompose: String?
+    /// Which text action the box is currently for. Nudge and reply travel
+    /// different herdr calls and are valid in opposite states, so the box has
+    /// to remember which one opened it.
+    @State private var composing: ComposeKind?
     @State private var revealNote: String?
     @State private var failure: String?
 
@@ -326,11 +329,13 @@ private struct AgentRow: View {
                 if available.canInterrupt {
                     ActionButton(title: "Stop", tint: Brand.machineDown) { run(.interrupt) }
                 }
+                if available.canReply {
+                    // The open question's answer. Approve/Decline cannot
+                    // express it, and Nudge cannot be sent while blocked.
+                    ActionButton(title: "Reply", tint: Brand.accent) { open(.reply) }
+                }
                 if available.canNudge {
-                    ActionButton(title: "Nudge", tint: Brand.secondaryText) {
-                        isNudging.toggle()
-                        pendingNudge = nil
-                    }
+                    ActionButton(title: "Nudge", tint: Brand.secondaryText) { open(.nudge) }
                 }
                 if available.canReveal {
                     // The row's one dependable action. Approve is missing on
@@ -350,23 +355,23 @@ private struct AgentRow: View {
             .padding(.top, 2)
             .disabled(isSending)
 
-            if isNudging {
-                if let pending = pendingNudge {
+            if let kind = composing {
+                if let pending = pendingCompose {
                     // Named, because the risk is not a typo — it is this text
                     // going to the wrong row. The panel is a list of similar
                     // rows and the buttons sit in the same place on each.
                     HStack(spacing: 6) {
-                        Text("Send to \(agent.provider) on \(machineName)?")
+                        Text("\(kind.verb) \(agent.provider) on \(machineName)?")
                             .font(Brand.sectionLabel)
                             .foregroundStyle(Brand.secondaryText)
                         ActionButton(title: "Confirm", tint: Brand.accent) {
-                            pendingNudge = nil
-                            isNudging = false
-                            nudge = ""
-                            run(.nudge(pending))
+                            pendingCompose = nil
+                            composing = nil
+                            compose = ""
+                            run(kind.intervention(pending))
                         }
                         ActionButton(title: "Cancel", tint: Brand.secondaryText) {
-                            pendingNudge = nil
+                            pendingCompose = nil
                         }
                         Spacer(minLength: 0)
                     }
@@ -378,11 +383,11 @@ private struct AgentRow: View {
                         .fixedSize(horizontal: false, vertical: true)
                 } else {
                     HStack(spacing: 6) {
-                        TextField("Tell it what to do", text: $nudge)
+                        TextField(kind.placeholder, text: $compose)
                             .textFieldStyle(.roundedBorder)
                             .font(Brand.body)
-                            .onSubmit { submitNudge() }
-                        ActionButton(title: "Send", tint: Brand.accent) { submitNudge() }
+                            .onSubmit { stageCompose() }
+                        ActionButton(title: "Send", tint: Brand.accent) { stageCompose() }
                     }
                     .padding(.top, 2)
                 }
@@ -408,11 +413,17 @@ private struct AgentRow: View {
         }
     }
 
+    private func open(_ kind: ComposeKind) {
+        composing = composing == kind ? nil : kind
+        pendingCompose = nil
+        compose = ""
+    }
+
     /// Stages the text rather than sending it. See the confirm row above.
-    private func submitNudge() {
-        let text = nudge.trimmingCharacters(in: .whitespacesAndNewlines)
+    private func stageCompose() {
+        let text = compose.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
-        pendingNudge = text
+        pendingCompose = text
     }
 
     private var machineName: String {
@@ -477,6 +488,39 @@ private struct AgentRow: View {
                 failure = String(describing: error)
             }
             isSending = false
+        }
+    }
+}
+
+/// The two things a row can send words with.
+///
+/// Separate cases rather than a flag, because they are valid in opposite
+/// states and travel different herdr calls: nudge is `agent.prompt` on a
+/// working agent, reply is `pane.send_text` on a blocked one, and herdr
+/// refuses each where the other belongs.
+private enum ComposeKind: Equatable {
+    case nudge
+    case reply
+
+    var placeholder: String {
+        switch self {
+        case .nudge: return "Tell it what to do"
+        case .reply: return "Answer its question"
+        }
+    }
+
+    /// Reads into the confirmation line, which names the target.
+    var verb: String {
+        switch self {
+        case .nudge: return "Send to"
+        case .reply: return "Reply to"
+        }
+    }
+
+    func intervention(_ text: String) -> Intervention {
+        switch self {
+        case .nudge: return .nudge(text)
+        case .reply: return .reply(text)
         }
     }
 }
