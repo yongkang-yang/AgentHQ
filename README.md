@@ -14,9 +14,14 @@ AgentHQ is **attention-first**, not a process list. Agents that are blocked,
 waiting for approval, failed, rate-limited, or finished come first; working
 agents stay visible but secondary.
 
-Status: **skeleton.** The domain model, module layering, and transport design
-are in place. The herdr client and the SSH tunnel supervisor are not yet
-implemented — see [Milestones](#milestones).
+Status: **early.** The domain model, transport, herdr client, and fleet
+session are in place and verified against a live herdr. The menu bar renders
+a real herd from the local machine. Remote machines work as far as the tunnel
+— see [Milestones](#milestones).
+
+`ssh -L` unix-socket forwarding is verified against a WSL2 host over
+Tailscale: usable 0.3s after launch, two concurrent connections served
+independently, a 200KB round trip in ~98ms.
 
 ## How it works
 
@@ -71,6 +76,7 @@ Two invariants worth knowing before reading the code:
 - macOS 14+
 - Swift 6 toolchain (Xcode 16+)
 - [herdr](https://herdr.dev) on every machine you want to watch
+  (verified against herdr 0.9.0, wire protocol 22)
 - OpenSSH 6.7+ for remote machines (unix-socket forwarding)
 
 ## Build
@@ -84,11 +90,12 @@ swift run AgentHQApp
 ## Milestones
 
 1. ~~Skeleton — layering, domain model, transport design~~ ✅
-2. **Remote walking skeleton** — one remote machine over `ssh -L`, one live
-   agent in the menu bar. Remote comes before local deliberately: if forwarding
-   a herdr socket has problems, that changes the product, and it should surface
-   first.
-3. Local machine as the degenerate case (transport = local)
+2. **Remote walking skeleton** — in progress. SSH tunnel supervision, the
+   herdr client, and the fleet session are done and verified end to end
+   against a local herdr; the remote leg needs herdr installed on a second
+   machine.
+3. ~~Local machine as the degenerate case (transport = local)~~ ✅ — it fell
+   out of the transport design for free
 4. Normalized state classifier + attention triage
 5. Interventions — approve/deny, nudge, interrupt/stop
 6. Machines settings UI, notification rules

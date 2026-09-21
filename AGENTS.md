@@ -37,10 +37,20 @@ design discussion, not a refactor.
    absent reason line is better than a guessed one.
 4. **`AgentHQHerdr` does not import `AgentHQFleet` or `AgentHQTransport`.** The
    package graph enforces this; keep it that way.
-5. **Two sockets to herdr, not one.** Request/response and the event stream get
-   separate connections. Sharing one races two readers on the same fd and
-   corrupts NDJSON framing.
-6. **No continuous animation inside `MenuBarExtra`.** It causes the panel to
+5. **One request, one connection.** herdr replies once and closes; reusing a
+   connection works exactly once and then fails with EPIPE forever. Verified
+   against herdr 0.9.0 / protocol 22. `events.subscribe` is the exception and
+   holds its connection open.
+6. **Never block an actor on a socket read.** The subscription read has no
+   timeout, because silence between events is normal. Running it on an actor
+   keeps that actor isolated inside the read forever and deadlocks everything
+   that calls it. It runs on a dedicated thread; closing the fd is what stops
+   it, since a blocking read cannot be cancelled from outside.
+7. **Decode against the live protocol, not an older client.** Protocol 22
+   renamed fields that a 17-era client still reads — `revision` for
+   `state_change_seq`, `label` for `name`, subscription objects for bare
+   strings. A wrong name decodes to zero or empty, not to an error.
+8. **No continuous animation inside `MenuBarExtra`.** It causes the panel to
    flicker open and closed. Emphasis is static.
 
 ## Style

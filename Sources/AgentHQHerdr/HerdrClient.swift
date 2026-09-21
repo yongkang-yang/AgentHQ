@@ -18,9 +18,13 @@ public struct HerdrPane: Sendable, Equatable {
     public let agent: String?
     public let title: String?
     public let cwd: String?
-    /// Monotonic per-pane counter. Used to detect that state moved on between
-    /// reading a pane and acting on it.
-    public let stateChangeSeq: UInt64
+    /// Monotonic per-pane counter, bumped on every change to the pane. Used
+    /// to detect that state moved on between reading a pane and acting on it.
+    ///
+    /// Protocol 22 calls this `revision`; protocol 17 called it
+    /// `state_change_seq`. Anything ported from a 17-era client will read the
+    /// old name and silently get zero.
+    public let revision: UInt64
 
     public init(
         paneId: String,
@@ -30,7 +34,7 @@ public struct HerdrPane: Sendable, Equatable {
         agent: String?,
         title: String?,
         cwd: String?,
-        stateChangeSeq: UInt64
+        revision: UInt64
     ) {
         self.paneId = paneId
         self.workspaceId = workspaceId
@@ -39,7 +43,7 @@ public struct HerdrPane: Sendable, Equatable {
         self.agent = agent
         self.title = title
         self.cwd = cwd
-        self.stateChangeSeq = stateChangeSeq
+        self.revision = revision
     }
 }
 
@@ -85,11 +89,13 @@ public enum HerdrEvent: Sendable, Equatable {
 /// lets this module stay a near-verbatim port from Shepherd while everything
 /// around it is new.
 ///
-/// **Two sockets, not one.** The implementation must open a second connection
-/// for the `events.subscribe` stream and never issue requests on it. Sharing
-/// one socket between a blocking event read-loop and concurrent requests races
-/// two readers on the same fd and corrupts NDJSON framing — a bug Shepherd
-/// already paid for, documented here so it is not rediscovered.
+/// **One request, one connection.** herdr 0.9.0 replies once and closes; a
+/// second request on the same socket dies with EPIPE. `events.subscribe` is
+/// the exception and holds its connection open, so it gets one of its own.
+///
+/// (Shepherd keeps two persistent sockets and serializes requests on one of
+/// them, to stop an event read-loop racing requests on a shared fd. That
+/// answers a protocol-17 problem; protocol 22 has no shared fd to race on.)
 public protocol HerdrClient: Sendable {
     func connect() async throws
     func disconnect() async
@@ -104,6 +110,3 @@ public protocol HerdrClient: Sendable {
     func interrupt(paneId: String) async throws
 }
 
-// TODO(port): LiveHerdrClient, ported from Shepherd's LiveHerdrAdapter +
-// NDJSONClient (MIT — see NOTICE). Port the NDJSON framing and the decoding
-// as-is; drop the socket-path resolution, which now lives in AgentHQTransport.
