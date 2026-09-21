@@ -45,7 +45,10 @@ public actor MachineSession {
 
     /// The machine as the fleet currently sees it.
     public func view() -> MachineView {
-        MachineView(machine: machine, reachability: reachability, agents: agents)
+        MachineView(
+            machine: machine, reachability: reachability,
+            agents: agents, herdrVersion: herdrVersion
+        )
     }
 
     public func start() async {

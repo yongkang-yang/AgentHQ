@@ -34,18 +34,31 @@ Milestone 7 (interventions) is committed, with tests. 116 tests green.
   matched none of its phrase rules, so the row said "needs input" and offered
   an Approve button. The classifier now consults the affordances.
 
-## Then milestone 8
+## Milestone 8 — done
 
-Machines UI and notification rules.
+**Notification rules.** The decisions live in `NotificationPolicy` in
+`AgentHQKit`, pure except for the memory of what it has already said, which is
+what makes them testable without a notification centre. The rules that matter:
 
-Two things found while building milestone 7 that belong to it:
+- The first snapshot only teaches. At launch every agent is new, and a herd
+  that has been sitting blocked for an hour is not news.
+- Announce on *entering* a state, never on every refresh.
+- `finished` is not announced. It is good news that can wait, and one
+  notification per completion is most of the noise a fleet produces.
+- `rateLimited` is announced although the user cannot clear it — otherwise
+  they assume progress.
+- A batch is one notification. Five at once is one event to a human.
+- Agents on an unreachable machine announce nothing; the machine announces
+  itself, once. A dropped tunnel must not read as a burst of alarms.
+- Every announcement names its machine.
 
-- **Notification rules have a natural source of truth.** `agent.explain` returns
-  herdr's own rule evaluation for a pane — rule id, priority, matched flag, and
-  the evidence region it matched against. A notification that says *which rule*
-  fired is far better than one that says "needs approval".
-- **`server.agent_manifests` lists every agent herdr can detect** (21 of them,
-  remotely updated). A machines UI can say what a host is capable of seeing.
+**Machines UI.** The footer rows became actionable: enable/disable without
+forgetting the machine, retry rather than waiting out a reconnect cycle, and
+the herdr version each host is running — hosts drift, and an old one reports
+fields this client no longer reads. The failure reason is shown verbatim.
+
+Not done, and deliberately: `server.agent_manifests` lists the 21 agents herdr
+can detect. Interesting, but it answers a question nobody has while triaging.
 
 ## Decided: `StateClassifier` does not defer to `agent.explain`
 

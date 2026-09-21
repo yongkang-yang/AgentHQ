@@ -8,6 +8,7 @@ import SwiftUI
 /// agent has to be findable regardless of which host it is on.
 struct PanelView: View {
     let fleet: FleetStore
+    let notifier: Notifier
     @State private var now = Date()
 
     private let tick = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
@@ -99,25 +100,17 @@ struct PanelView: View {
     private var footer: some View {
         VStack(alignment: .leading, spacing: 6) {
             ForEach(fleet.snapshot.machines) { view in
-                HStack(spacing: 6) {
-                    Circle()
-                        .fill(view.reachability.isConnected
-                              ? Brand.color(for: .working)
-                              : Brand.machineDown)
-                        .frame(width: 6, height: 6)
-                    Text(view.machine.displayName).font(Brand.mono)
-                    Text(reachabilityText(view.reachability))
-                        .font(Brand.sectionLabel)
-                        .foregroundStyle(view.reachability.isConnected
-                                         ? Brand.secondaryText : Brand.machineDown)
-                    Spacer()
-                    Text("\(view.agents.count)")
-                        .font(Brand.mono)
-                        .foregroundStyle(Brand.secondaryText)
-                }
+                MachineRow(view: view, fleet: fleet)
             }
 
-            HStack {
+            HStack(spacing: 8) {
+                Toggle("Notify", isOn: Binding(
+                    get: { notifier.isEnabled },
+                    set: { notifier.isEnabled = $0 }
+                ))
+                .toggleStyle(.checkbox)
+                .font(Brand.body)
+                .help("Notify when an agent needs you, or a machine stops answering")
                 Spacer()
                 Button("Quit") { NSApplication.shared.terminate(nil) }
                     .font(Brand.body)
@@ -128,14 +121,77 @@ struct PanelView: View {
         .padding(.vertical, 10)
     }
 
-    private func reachabilityText(_ reachability: MachineReachability) -> String {
-        switch reachability {
-        case .connected:              return "connected"
-        case .connecting:             return "connecting…"
-        case .disabled:               return "disabled"
-        case .reconnecting(let n):    return "reconnecting (\(n))"
-        // Verbatim, never summarized: "unreachable" alone tells the user
-        // nothing they can act on.
+}
+
+/// One machine: whether it is answering, what it is running, and the two
+/// things the user can actually do about it.
+private struct MachineRow: View {
+    let view: MachineView
+    let fleet: FleetStore
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Circle()
+                .fill(dotColor)
+                .frame(width: 6, height: 6)
+            Text(view.machine.displayName).font(Brand.mono)
+
+            Text(statusText)
+                .font(Brand.sectionLabel)
+                .foregroundStyle(isDown ? Brand.machineDown : Brand.secondaryText)
+                .lineLimit(1)
+                .help(statusText)
+
+            if let version = view.herdrVersion, view.reachability.isConnected {
+                Text("herdr \(version)")
+                    .font(Brand.mono)
+                    .foregroundStyle(Brand.secondaryText)
+            }
+
+            Spacer()
+
+            if isDown {
+                // Rather than waiting out a reconnect cycle while looking at
+                // a machine you know is back.
+                Button("Retry") { fleet.retry(view.machine.id) }
+                    .font(Brand.sectionLabel)
+                    .buttonStyle(.link)
+            }
+            Button(view.machine.isEnabled ? "Disable" : "Enable") {
+                fleet.setEnabled(!view.machine.isEnabled, for: view.machine.id)
+            }
+            .font(Brand.sectionLabel)
+            .buttonStyle(.link)
+            .help(view.machine.isEnabled
+                  ? "Stop watching this machine and close its tunnel"
+                  : "Watch this machine again")
+
+            Text("\(view.agents.count)")
+                .font(Brand.mono)
+                .foregroundStyle(Brand.secondaryText)
+                .frame(minWidth: 14, alignment: .trailing)
+        }
+    }
+
+    private var isDown: Bool {
+        if case .unreachable = view.reachability { return true }
+        return false
+    }
+
+    private var dotColor: Color {
+        if view.reachability.isConnected { return Brand.color(for: .working) }
+        if isDown { return Brand.machineDown }
+        return Brand.secondaryText
+    }
+
+    /// Verbatim for a failure. "Unreachable" alone tells the user nothing they
+    /// can act on; the reason names the host and what it refused.
+    private var statusText: String {
+        switch view.reachability {
+        case .connected:               return "connected"
+        case .connecting:              return "connecting…"
+        case .disabled:                return "disabled"
+        case .reconnecting(let n):     return "reconnecting (\(n))"
         case .unreachable(let reason): return reason
         }
     }

@@ -15,6 +15,12 @@ public final class FleetStore {
     private var sessions: [MachineID: MachineSession] = [:]
     private var refreshTask: Task<Void, Never>?
     private var hasStarted = false
+    private var notificationPolicy = NotificationPolicy()
+
+    /// Called with whatever the policy decided is worth saying, after each
+    /// refresh. The store does not know what a notification is; it only knows
+    /// when the fleet changed.
+    public var onAnnouncements: (@MainActor (AnnouncementBatch) -> Void)?
 
     public init() {}
 
@@ -87,6 +93,34 @@ public final class FleetStore {
         }
     }
 
+    /// Turn a machine on or off without forgetting it.
+    ///
+    /// Disabling tears the tunnel down; the machine stays in the list so the
+    /// user can see it is theirs and off, rather than wondering where it went.
+    public func setEnabled(_ isEnabled: Bool, for id: MachineID) {
+        guard let session = sessions[id] else { return }
+        var machine = session.machine
+        guard machine.isEnabled != isEnabled else { return }
+        machine.isEnabled = isEnabled
+
+        sessions[id] = MachineSession(machine: machine)
+        Task { [weak self, session] in
+            await session.stop()
+            await self?.sessions[id]?.start()
+            await self?.refresh()
+        }
+    }
+
+    /// Try a machine again now, rather than waiting for a reconnect cycle.
+    public func retry(_ id: MachineID) {
+        guard let session = sessions[id] else { return }
+        Task { [weak self] in
+            await session.stop()
+            await session.start()
+            await self?.refresh()
+        }
+    }
+
     public func remove(_ id: MachineID) {
         guard let session = sessions.removeValue(forKey: id) else { return }
         Task { [weak self] in
@@ -119,5 +153,8 @@ public final class FleetStore {
         }
         views.sort { $0.machine.displayName < $1.machine.displayName }
         snapshot = FleetSnapshot(machines: views)
+
+        let batch = notificationPolicy.announcements(for: snapshot)
+        if !batch.isEmpty { onAnnouncements?(batch) }
     }
 }

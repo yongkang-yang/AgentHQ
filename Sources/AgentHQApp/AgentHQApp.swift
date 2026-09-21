@@ -6,10 +6,11 @@ import SwiftUI
 @main
 struct AgentHQApp: App {
     @State private var fleet = FleetStore()
+    @State private var notifier = Notifier()
 
     var body: some Scene {
         MenuBarExtra {
-            PanelView(fleet: fleet)
+            PanelView(fleet: fleet, notifier: notifier)
         } label: {
             MenuBarLabel(signal: fleet.signal)
                 // Startup hangs off the label, not the panel and not `init`.
@@ -19,6 +20,10 @@ struct AgentHQApp: App {
                 // `App.init` runs before SwiftUI installs the @State, so work
                 // started there can act on an instance the views never observe.
                 .task {
+                    notifier.prepare()
+                    fleet.onAnnouncements = { [notifier] batch in
+                        notifier.deliver(batch)
+                    }
                     fleet.start(
                         localSocketPath: LocalSocketTransport.resolveDefaultSocketPath()
                     )

@@ -16,7 +16,8 @@ agents stay visible but secondary.
 
 Status: **working.** It builds as a menu-bar app, imports machines from
 herdr's own registry, tunnels to them over SSH, classifies what each agent is
-waiting on, and can answer, decline, interrupt or nudge one from the panel.
+waiting on, and can answer, decline, interrupt, nudge or reveal one from the panel. It
+notifies when an agent needs you or a machine stops answering.
 Verified end to end against a local herdr and a WSL host over Tailscale.
 
 `ssh -L` unix-socket forwarding is verified against a WSL2 host over
@@ -98,7 +99,7 @@ swift run AgentHQApp
 5. ~~Reap tunnels orphaned by a previous run~~ ✅
 6. ~~Normalized state classifier + attention triage~~ ✅
 7. ~~Interventions — approve / decline / interrupt / nudge~~ ✅
-8. Machines UI, notification rules
+8. ~~Machines UI, notification rules~~ ✅
 
 Not in v1: usage/cost dashboard, MCP server, detecting agents outside herdr,
 a terminal emulator.

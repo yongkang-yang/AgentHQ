@@ -13,11 +13,21 @@ public struct MachineView: Sendable, Equatable, Identifiable {
     public let machine: Machine
     public let reachability: MachineReachability
     public let agents: [Agent]
+    /// The herdr this machine is running, once it has answered. Worth showing:
+    /// hosts drift, and a machine on an older protocol reports fields this
+    /// client no longer reads.
+    public let herdrVersion: String?
 
-    public init(machine: Machine, reachability: MachineReachability, agents: [Agent]) {
+    public init(
+        machine: Machine,
+        reachability: MachineReachability,
+        agents: [Agent],
+        herdrVersion: String? = nil
+    ) {
         self.machine = machine
         self.reachability = reachability
         self.agents = agents
+        self.herdrVersion = herdrVersion
     }
 
     public var agentsAreStale: Bool { reachability.agentsAreStale }
