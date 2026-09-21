@@ -14,10 +14,10 @@ AgentHQ is **attention-first**, not a process list. Agents that are blocked,
 waiting for approval, failed, rate-limited, or finished come first; working
 agents stay visible but secondary.
 
-Status: **early.** The domain model, transport, herdr client, and fleet
-session are in place and verified against a live herdr. The menu bar renders
-a real herd from the local machine. Remote machines work as far as the tunnel
-— see [Milestones](#milestones).
+Status: **working.** It builds as a menu-bar app, imports machines from
+herdr's own registry, tunnels to them over SSH, classifies what each agent is
+waiting on, and can answer, decline, interrupt or nudge one from the panel.
+Verified end to end against a local herdr and a WSL host over Tailscale.
 
 `ssh -L` unix-socket forwarding is verified against a WSL2 host over
 Tailscale: usable 0.3s after launch, two concurrent connections served
@@ -89,16 +89,16 @@ swift run AgentHQApp
 
 ## Milestones
 
-1. ~~Skeleton — layering, domain model, transport design~~ ✅
-2. **Remote walking skeleton** — in progress. SSH tunnel supervision, the
-   herdr client, and the fleet session are done and verified end to end
-   against a local herdr; the remote leg needs herdr installed on a second
-   machine.
-3. ~~Local machine as the degenerate case (transport = local)~~ ✅ — it fell
-   out of the transport design for free
-4. Normalized state classifier + attention triage
-5. Interventions — approve/deny, nudge, interrupt/stop
-6. Machines settings UI, notification rules
+1. ~~Skeleton — layering, domain model, LICENSE/NOTICE, DESIGN.md~~ ✅
+2. ~~Remote walking skeleton — a WSL machine over `ssh -L`, live agents, live
+   event push~~ ✅
+3. ~~Local machine as the degenerate case~~ ✅ (fell out of the transport design)
+4. ~~Adopt herdr's machine registry; derive the remote socket path from
+   `session`~~ ✅
+5. ~~Reap tunnels orphaned by a previous run~~ ✅
+6. ~~Normalized state classifier + attention triage~~ ✅
+7. ~~Interventions — approve / decline / interrupt / nudge~~ ✅
+8. Machines UI, notification rules
 
 Not in v1: usage/cost dashboard, MCP server, detecting agents outside herdr,
 a terminal emulator.

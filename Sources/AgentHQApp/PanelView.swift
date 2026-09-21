@@ -36,7 +36,8 @@ struct PanelView: View {
                                     title: group.title,
                                     agents: agents,
                                     machineNames: machineNames,
-                                    now: now
+                                    now: now,
+                                    fleet: fleet
                                 )
                             }
                         }
@@ -144,6 +145,7 @@ private struct GroupSection: View {
     let agents: [Agent]
     let machineNames: [MachineID: String]
     let now: Date
+    let fleet: FleetStore
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -157,7 +159,8 @@ private struct GroupSection: View {
                 AgentRow(
                     agent: agent,
                     machineName: machineNames[agent.ref.machine] ?? String(agent.ref.machine.raw.prefix(8)),
-                    now: now
+                    now: now,
+                    fleet: fleet
                 )
                     .padding(.horizontal, 14)
             }
@@ -169,6 +172,12 @@ private struct AgentRow: View {
     let agent: Agent
     let machineName: String
     let now: Date
+    let fleet: FleetStore
+
+    @State private var isSending = false
+    @State private var isNudging = false
+    @State private var nudge = ""
+    @State private var failure: String?
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
@@ -218,6 +227,8 @@ private struct AgentRow: View {
                         .lineLimit(2)
                         .fixedSize(horizontal: false, vertical: true)
                 }
+
+                actions
             }
         }
         .padding(.vertical, 8)
@@ -226,5 +237,116 @@ private struct AgentRow: View {
             RoundedRectangle(cornerRadius: 10, style: .continuous)
                 .fill(Color.primary.opacity(0.025))
         )
+    }
+
+    // MARK: - Actions
+
+    /// Only what the agent's own prompt offers, and each button says which key
+    /// it will press.
+    ///
+    /// Naming the key is not a debugging detail: an Approve button that does not
+    /// say `y` asks the user to trust that AgentHQ read the prompt correctly,
+    /// and this is the one place in the product where a wrong reading is
+    /// destructive rather than merely visible.
+    @ViewBuilder private var actions: some View {
+        let available = agent.actions
+
+        if available != .none || failure != nil {
+            HStack(spacing: 6) {
+                if let key = available.approveKey {
+                    ActionButton(title: "Approve (\(key))", tint: Brand.color(for: .working)) {
+                        run(.approve)
+                    }
+                }
+                if let key = available.denyKey {
+                    ActionButton(title: "Decline (\(key))", tint: Brand.secondaryText) {
+                        run(.deny)
+                    }
+                }
+                if available.canInterrupt {
+                    ActionButton(title: "Stop", tint: Brand.machineDown) { run(.interrupt) }
+                }
+                if available.canNudge {
+                    ActionButton(title: "Nudge", tint: Brand.secondaryText) {
+                        isNudging.toggle()
+                    }
+                }
+                Spacer(minLength: 0)
+                if isSending {
+                    // A static word, not a spinner: continuous animation inside
+                    // `MenuBarExtra` makes the panel flicker open and closed.
+                    Text("sending…")
+                        .font(Brand.sectionLabel)
+                        .foregroundStyle(Brand.secondaryText)
+                }
+            }
+            .padding(.top, 2)
+            .disabled(isSending)
+
+            if isNudging {
+                HStack(spacing: 6) {
+                    TextField("Tell it what to do", text: $nudge)
+                        .textFieldStyle(.roundedBorder)
+                        .font(Brand.body)
+                        .onSubmit { submitNudge() }
+                    ActionButton(title: "Send", tint: Brand.accent) { submitNudge() }
+                }
+                .padding(.top, 2)
+            }
+
+            // Shown in place, next to the button that failed, and left up until
+            // the next attempt: a refusal that vanishes on the next refresh
+            // reads as the click having worked.
+            if let failure {
+                Text(failure)
+                    .font(Brand.sectionLabel)
+                    .foregroundStyle(Brand.machineDown)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.top, 1)
+            }
+        }
+    }
+
+    private func submitNudge() {
+        let text = nudge
+        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        nudge = ""
+        isNudging = false
+        run(.nudge(text))
+    }
+
+    private func run(_ intervention: Intervention) {
+        failure = nil
+        isSending = true
+        Task {
+            do {
+                try await fleet.perform(intervention, on: agent.ref)
+            } catch let error as InterventionError {
+                failure = error.summary
+            } catch {
+                // Verbatim. A transport error here already reads as a sentence,
+                // and a summarized one tells the user nothing to act on.
+                failure = String(describing: error)
+            }
+            isSending = false
+        }
+    }
+}
+
+private struct ActionButton: View {
+    let title: String
+    let tint: Color
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Text(title)
+                .font(Brand.sectionLabel)
+                .foregroundStyle(tint)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 3)
+                .background(Capsule().fill(tint.opacity(0.14)))
+        }
+        .buttonStyle(.plain)
     }
 }

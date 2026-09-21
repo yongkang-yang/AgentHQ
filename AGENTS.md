@@ -47,11 +47,48 @@ design discussion, not a refactor.
    that calls it. It runs on a dedicated thread; closing the fd is what stops
    it, since a blocking read cannot be cancelled from outside.
 7. **Decode against the live protocol, not an older client.** Protocol 22
-   renamed fields that a 17-era client still reads — `revision` for
-   `state_change_seq`, `label` for `name`, subscription objects for bare
-   strings. A wrong name decodes to zero or empty, not to an error.
-8. **No continuous animation inside `MenuBarExtra`.** It causes the panel to
-   flicker open and closed. Emphasis is static.
+   renamed fields a 17-era client still reads — `label` for `name`,
+   subscription objects for bare strings. A wrong name decodes to zero or
+   empty, not to an error.
+
+8. **`state_change_seq` is the staleness stamp, and it is not `revision`.**
+   An earlier version of this file said protocol 22 renamed one to the other.
+   That was wrong, and wrong in exactly the direction the invariant above
+   warns about. Measured against herdr 0.9.1:
+
+   - `agent.get` and `agent.list` return **both**, with different values
+     (253 and 8 on the same pane).
+   - `revision` does not track agent state. It sits unmoved through sending
+     text, running a command, renaming a pane, an agent being detected in it,
+     and that agent going blocked.
+   - `state_change_seq` moves on agent state changes and is **herd-wide**: two
+     panes driven through alternating changes yield one rising sequence
+     (230/232/234 interleaved with 231/233/235). Each agent keeps its own
+     stamp from that clock, which is what makes a per-agent comparison valid.
+   - It appears **only** on `agent.get` / `agent.list`. Neither
+     `session.snapshot`'s pane records nor `pane.get` carry it. A client that
+     read it off a pane would get nil, default it to zero, compare zero to
+     zero, and believe every staleness check passed.
+
+   So `Agent.stateSeq` is optional and the guard **fails closed**: a row with
+   no stamp refuses to send rather than sending unguarded.
+
+9. **Answering a prompt goes through `pane.send_keys`, never `agent.prompt`.**
+   `agent.prompt` takes `target`, not `pane_id` — a `pane_id` is rejected with
+   `missing field \`target\`` — and it refuses a blocked agent outright with
+   `agent_blocked: requires interactive input`. Which is the whole case
+   answering a prompt exists for.
+
+10. **Never infer an answer key from which agent is running.** A provider-keyed
+    table ("claude answers with enter") is wrong across versions and wrong
+    across the several prompt shapes one agent uses. `PromptAffordances` reads
+    the key out of the prompt's own footer, and offers nothing where the prompt
+    named nothing. Most prompts are highlighted-row menus whose footer says
+    "enter to confirm", and enter there takes whichever row is highlighted —
+    which herdr reports nothing about. An Approve button there would be
+    pressing enter and hoping.
+11. **No continuous animation inside `MenuBarExtra`.** It causes the panel to
+    flicker open and closed. Emphasis is static.
 
 ## Style
 

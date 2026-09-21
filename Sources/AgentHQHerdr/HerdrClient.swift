@@ -18,12 +18,15 @@ public struct HerdrPane: Sendable, Equatable {
     public let agent: String?
     public let title: String?
     public let cwd: String?
-    /// Monotonic per-pane counter, bumped on every change to the pane. Used
-    /// to detect that state moved on between reading a pane and acting on it.
+    /// herdr's `revision` for the pane, decoded faithfully and used for
+    /// nothing.
     ///
-    /// Protocol 22 calls this `revision`; protocol 17 called it
-    /// `state_change_seq`. Anything ported from a 17-era client will read the
-    /// old name and silently get zero.
+    /// It looks like the staleness counter and is not one. Measured on a live
+    /// pane, it stayed at 0 across sending text, running a command, renaming
+    /// the pane, an agent being detected in it, and that agent going blocked —
+    /// while `state_change_seq` moved on the state change. Anything that needs
+    /// to know whether an agent moved must read ``HerdrAgentInfo`` instead;
+    /// this field is kept only so the pane record decodes completely.
     public let revision: UInt64
 
     public init(
@@ -44,6 +47,43 @@ public struct HerdrPane: Sendable, Equatable {
         self.title = title
         self.cwd = cwd
         self.revision = revision
+    }
+}
+
+// MARK: - HerdrAgentInfo
+
+/// One agent as `agent.get` / `agent.list` describe it.
+///
+/// Separate from ``HerdrPane`` because herdr's two views of the same pane do
+/// not carry the same fields, and the difference is load-bearing: the agent
+/// views carry `state_change_seq` and the pane views do not. Folding them into
+/// one type would mean a field that is populated or zero depending on which
+/// call filled it, which is precisely the silent-zero trap protocol 22 is full
+/// of.
+public struct HerdrAgentInfo: Sendable, Equatable {
+    public let paneId: String
+    public let agent: String
+    public let agentStatus: String
+
+    /// herdr's state-change clock as of this agent's last change.
+    ///
+    /// Herd-wide and monotonic, not per-pane: driving two panes through
+    /// alternating state changes yields one rising sequence across both
+    /// (measured — 230, 232, 234 on one pane interleaved with 231, 233, 235 on
+    /// the other). Each agent keeps its own stamp from that clock, so an
+    /// unchanged stamp still means *this* agent has not moved.
+    ///
+    /// This is the counter ``HerdrPane/revision`` was mistaken for. `revision`
+    /// sits at 0 through output, renames, agent detection and a blocked
+    /// transition; it is not a usable staleness token and nothing should treat
+    /// it as one.
+    public let stateChangeSeq: UInt64
+
+    public init(paneId: String, agent: String, agentStatus: String, stateChangeSeq: UInt64) {
+        self.paneId = paneId
+        self.agent = agent
+        self.agentStatus = agentStatus
+        self.stateChangeSeq = stateChangeSeq
     }
 }
 
@@ -97,6 +137,9 @@ public enum HerdrEvent: Sendable, Equatable {
 /// them, to stop an event read-loop racing requests on a shared fd. That
 /// answers a protocol-17 problem; protocol 22 has no shared fd to race on.)
 public protocol HerdrClient: Sendable {
+    /// herdr's handshake, for the version and protocol it speaks.
+    func handshake() async throws -> (version: String, protocolVersion: Int)
+
     func connect() async throws
     func disconnect() async
 
@@ -109,9 +152,17 @@ public protocol HerdrClient: Sendable {
     /// not a failure worth surfacing.
     func readPane(paneId: String, lines: Int) async throws -> String?
 
+    /// Every agent herdr currently sees, with its state-change stamp. One
+    /// round trip for the whole machine.
+    func agents() async throws -> [HerdrAgentInfo]
+
+    /// One agent, re-read immediately before acting on it. Nil when it is gone.
+    func agent(paneId: String) async throws -> HerdrAgentInfo?
+
     // Interventions. Every one of these travels the same socket as the reads,
     // so they work unchanged over a forwarded tunnel.
     func sendKeys(paneId: String, keys: [String]) async throws
+    func sendText(paneId: String, text: String) async throws
     func prompt(paneId: String, text: String) async throws
     func interrupt(paneId: String) async throws
 }

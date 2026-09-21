@@ -20,3 +20,11 @@ AgentHQ.app/
 *.sock
 journal/
 *.jsonl
+
+## Stray files
+# Images and scratch dropped into the repo root — an `add -A` once swept a
+# 747KB screenshot into a public commit.
+*.png
+*.jpg
+*.jpeg
+!docs/**/*.png

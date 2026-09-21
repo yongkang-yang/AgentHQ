@@ -36,6 +36,21 @@ public struct Agent: Sendable, Equatable, Identifiable {
     /// Last time output was seen, when known.
     public var lastActivityAt: Date?
 
+    /// Which interventions the row may offer. Empty is a normal answer.
+    public var actions: AgentActions
+
+    /// herdr's reading of its state-change clock at this agent's last change.
+    ///
+    /// The clock is herd-wide — two agents changing state alternately produce
+    /// one rising sequence, not two — but each agent keeps the value it was
+    /// stamped with, so an unchanged stamp means *this* agent has not moved no
+    /// matter how busy the rest of the herd was. That is what makes it usable
+    /// as the token an intervention is checked against.
+    ///
+    /// Nil when it was not read. An action that needs the guard refuses
+    /// without it rather than proceeding unguarded.
+    public var stateSeq: UInt64?
+
     public init(
         ref: AgentRef,
         provider: String,
@@ -44,7 +59,9 @@ public struct Agent: Sendable, Equatable, Identifiable {
         state: AgentState = .unknown,
         reason: String? = nil,
         stateEnteredAt: Date = Date(),
-        lastActivityAt: Date? = nil
+        lastActivityAt: Date? = nil,
+        actions: AgentActions = .none,
+        stateSeq: UInt64? = nil
     ) {
         self.ref = ref
         self.provider = provider
@@ -54,6 +71,8 @@ public struct Agent: Sendable, Equatable, Identifiable {
         self.reason = reason
         self.stateEnteredAt = stateEnteredAt
         self.lastActivityAt = lastActivityAt
+        self.actions = actions
+        self.stateSeq = stateSeq
     }
 
     /// How long the agent has been in its current state.

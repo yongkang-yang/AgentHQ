@@ -95,6 +95,19 @@ public final class FleetStore {
         }
     }
 
+    // MARK: - Interventions
+
+    /// Act on one agent, wherever it is.
+    ///
+    /// Routed by machine rather than searched for by pane id: pane ids are only
+    /// unique within a machine, so searching every session for one is how a
+    /// keystroke ends up on the wrong host.
+    public func perform(_ intervention: Intervention, on ref: AgentRef) async throws {
+        guard let session = sessions[ref.machine] else { throw InterventionError.agentGone }
+        try await session.perform(intervention, on: ref.agent)
+        await refresh()
+    }
+
     /// Rebuild the snapshot from every session.
     ///
     /// Assembled as one value and assigned once, so a view never renders a

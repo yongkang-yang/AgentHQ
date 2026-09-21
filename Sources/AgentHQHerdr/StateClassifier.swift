@@ -253,15 +253,18 @@ public extension HerdrSnapshot {
         on machine: MachineID,
         classifier: StateClassifier = StateClassifier(),
         output: [String: String] = [:],
+        stateSeqs: [String: UInt64] = [:],
         now: Date = Date()
     ) -> [Agent] {
-        panes.compactMap { pane in
+        let affordances = PromptAffordances()
+        return panes.compactMap { pane in
             guard !pane.paneId.isEmpty else { return nil }
             guard let provider = pane.agent, !provider.isEmpty else { return nil }
 
+            let recent = output[pane.paneId]
             let classification = classifier.classify(
                 status: pane.agentStatus,
-                recentOutput: output[pane.paneId]
+                recentOutput: recent
             )
 
             return Agent(
@@ -272,7 +275,12 @@ public extension HerdrSnapshot {
                 state: classification.state,
                 reason: classification.reason,
                 stateEnteredAt: now,
-                lastActivityAt: nil
+                lastActivityAt: nil,
+                // Derived from the same output the state came from, so the
+                // buttons on a row and the pill on it can never disagree about
+                // which prompt they are describing.
+                actions: affordances.actions(for: classification.state, recentOutput: recent),
+                stateSeq: stateSeqs[pane.paneId]
             )
         }
     }

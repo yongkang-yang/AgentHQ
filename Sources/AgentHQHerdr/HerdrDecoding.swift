@@ -4,8 +4,12 @@ import Foundation
 ///
 /// Field names below were read off a live socket, not inferred from an older
 /// client. Protocol 22 renamed enough that guessing would quietly produce
-/// empty rows: panes carry `revision` where 17 had `state_change_seq`, and
-/// workspaces and tabs carry `label` where 17 had `name`.
+/// empty rows: workspaces and tabs carry `label` where 17 had `name`.
+///
+/// `revision` and `state_change_seq` are *not* two names for one field, which
+/// is the easy mistake to make from the rename above. `agent.get` returns both
+/// at once with different values, and only `state_change_seq` tracks agent
+/// state — see ``HerdrAgentInfo/stateChangeSeq``.
 extension LiveHerdrClient {
     static func decodeSnapshot(_ snap: [String: Any]) -> HerdrSnapshot {
         let workspaces = snap["workspaces"] as? [[String: Any]] ?? []
@@ -39,6 +43,23 @@ extension LiveHerdrClient {
             // is where the shell started. They differ the moment anyone cds.
             cwd: pane["foreground_cwd"] as? String ?? pane["cwd"] as? String,
             revision: (pane["revision"] as? NSNumber)?.uint64Value ?? 0
+        )
+    }
+
+    /// One agent from `agent.list` or `agent.get`.
+    ///
+    /// `state_change_seq` is read here and nowhere else, because it exists
+    /// nowhere else: neither `session.snapshot`'s pane records nor `pane.get`
+    /// carry it. Reading it off a pane yields nil, and a client that treated
+    /// that as zero would compare zero against zero and believe every
+    /// staleness check passed.
+    static func decodeAgentInfo(_ agent: [String: Any]) -> HerdrAgentInfo? {
+        guard let paneId = agent["pane_id"] as? String, !paneId.isEmpty else { return nil }
+        return HerdrAgentInfo(
+            paneId: paneId,
+            agent: agent["agent"] as? String ?? "",
+            agentStatus: agent["agent_status"] as? String ?? "unknown",
+            stateChangeSeq: (agent["state_change_seq"] as? NSNumber)?.uint64Value ?? 0
         )
     }
 

@@ -50,7 +50,7 @@ public actor LiveHerdrClient: HerdrClient {
     // MARK: - Lifecycle
 
     public func connect() async throws {
-        _ = try await ping()
+        _ = try await handshake()
         startSubscription()
     }
 
@@ -69,7 +69,7 @@ public actor LiveHerdrClient: HerdrClient {
 
     /// herdr's handshake. Returns its version and protocol.
     @discardableResult
-    public func ping() async throws -> (version: String, protocolVersion: Int) {
+    public func handshake() async throws -> (version: String, protocolVersion: Int) {
         let result = try await request(method: "ping", params: [:])
         return (
             result["version"] as? String ?? "",
@@ -96,14 +96,56 @@ public actor LiveHerdrClient: HerdrClient {
         return read["text"] as? String
     }
 
+    public func agents() async throws -> [HerdrAgentInfo] {
+        let result = try await request(method: "agent.list", params: [:])
+        let agents = result["agents"] as? [[String: Any]] ?? []
+        return agents.compactMap(Self.decodeAgentInfo)
+    }
+
+    public func agent(paneId: String) async throws -> HerdrAgentInfo? {
+        do {
+            let result = try await request(method: "agent.get", params: ["target": paneId])
+            guard let agent = result["agent"] as? [String: Any] else { return nil }
+            return Self.decodeAgentInfo(agent)
+        } catch HerdrProtocolError.herdr(let code, _)
+                    where code == "agent_not_found" || code == "pane_not_found" {
+            // Absence is an answer, and the caller — an intervention checking
+            // that its target still exists — needs to tell it apart from a
+            // socket that fell over.
+            return nil
+        }
+    }
+
+    /// Press keys in a pane.
+    ///
+    /// herdr validates the names (`banana` comes back `invalid_key`), so a
+    /// typo here fails loudly rather than being typed into the pane as text.
+    /// What it does *not* validate is the params object: it ignored an invented
+    /// `expected_revision` field and answered `ok`, so there is no
+    /// compare-and-swap to lean on. The guard has to happen on this side —
+    /// see `MachineSession.perform`.
     public func sendKeys(paneId: String, keys: [String]) async throws {
         _ = try await request(method: "pane.send_keys", params: ["pane_id": paneId, "keys": keys])
     }
 
-    public func prompt(paneId: String, text: String) async throws {
-        _ = try await request(method: "agent.prompt", params: ["pane_id": paneId, "text": text])
+    public func sendText(paneId: String, text: String) async throws {
+        _ = try await request(method: "pane.send_text", params: ["pane_id": paneId, "text": text])
     }
 
+    /// Submit a prompt to the agent in a pane.
+    ///
+    /// The parameter is `target`, not `pane_id`. A `pane_id` here is not a
+    /// wrong-value error — herdr rejects the whole request with
+    /// `missing field `target``, so this call never worked at all.
+    ///
+    /// `target` accepts a pane id and nothing else useful: a terminal id comes
+    /// back `agent_not_found`.
+    public func prompt(paneId: String, text: String) async throws {
+        _ = try await request(method: "agent.prompt", params: ["target": paneId, "text": text])
+    }
+
+    /// `C-c`, verified against herdr 0.9.1: sent to a pane running `sleep 300`
+    /// it produced `^C` and returned the shell prompt.
     public func interrupt(paneId: String) async throws {
         try await sendKeys(paneId: paneId, keys: ["C-c"])
     }

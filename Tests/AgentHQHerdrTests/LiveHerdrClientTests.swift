@@ -19,7 +19,7 @@ struct LiveHerdrClientTests {
 
     @Test("handshake reports a version and protocol")
     func handshake() async throws {
-        let (version, proto) = try await client().ping()
+        let (version, proto) = try await client().handshake()
         #expect(!version.isEmpty)
         #expect(proto > 0)
         if !LiveHerdrClient.verifiedProtocols.contains(proto) {
@@ -34,10 +34,10 @@ struct LiveHerdrClientTests {
         // is the cheapest way to catch that regression.
         let subject = client()
         for _ in 0..<3 {
-            _ = try await subject.ping()
+            _ = try await subject.handshake()
         }
         _ = try await subject.snapshot()
-        _ = try await subject.ping()
+        _ = try await subject.handshake()
     }
 
     @Test("snapshot decodes panes with real field names")
