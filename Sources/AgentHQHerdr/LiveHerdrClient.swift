@@ -85,6 +85,17 @@ public actor LiveHerdrClient: HerdrClient {
         return Self.decodeSnapshot(snap)
     }
 
+    public func readPane(paneId: String, lines: Int = 60) async throws -> String? {
+        // `recent` is the scrollback tail rather than what happens to be on
+        // screen; `visible` would miss a prompt that has scrolled a line up.
+        let result = try await request(
+            method: "pane.read",
+            params: ["pane_id": paneId, "source": "recent", "lines": lines]
+        )
+        guard let read = result["read"] as? [String: Any] else { return nil }
+        return read["text"] as? String
+    }
+
     public func sendKeys(paneId: String, keys: [String]) async throws {
         _ = try await request(method: "pane.send_keys", params: ["pane_id": paneId, "keys": keys])
     }

@@ -78,7 +78,37 @@ public actor MachineSession {
         guard let client else { return }
         let snapshot = try await client.snapshot()
         workspaceNames = snapshot.workspaceNames
-        agents = reconcile(snapshot.agents(on: machine.id))
+        let output = await readOutput(for: snapshot.panes, using: client)
+        agents = reconcile(snapshot.agents(on: machine.id, output: output))
+    }
+
+    /// Fetch the output tail for every pane running an agent, concurrently.
+    ///
+    /// One round trip per pane, ~115ms each to a machine across a tunnel, so
+    /// they go out together rather than in series. A pane that cannot be read
+    /// simply has no entry and gets classified from its status alone — the
+    /// classifier is built to degrade that way.
+    private func readOutput(
+        for panes: [HerdrPane],
+        using client: LiveHerdrClient
+    ) async -> [String: String] {
+        let paneIds = panes
+            .filter { $0.agent?.isEmpty == false }
+            .map(\.paneId)
+        guard !paneIds.isEmpty else { return [:] }
+
+        return await withTaskGroup(of: (String, String?).self) { group in
+            for paneId in paneIds {
+                group.addTask {
+                    (paneId, try? await client.readPane(paneId: paneId, lines: 60))
+                }
+            }
+            var result: [String: String] = [:]
+            for await (paneId, text) in group {
+                if let text { result[paneId] = text }
+            }
+            return result
+        }
     }
 
     /// Carry dwell forward across refreshes.
@@ -93,6 +123,19 @@ public actor MachineSession {
             var carried = agent
             carried.stateEnteredAt = old.stateEnteredAt
             return carried
+        }
+    }
+
+    /// Whether a pane in this state is worth spending a read on.
+    ///
+    /// A blocked agent is waiting on something the user has to see, and a
+    /// finished one may have finished by failing. A working one is just
+    /// producing output, and reading it on every event would mean a round trip
+    /// per line of agent chatter.
+    static func warrantsOutputRead(_ status: String) -> Bool {
+        switch status.lowercased() {
+        case "blocked", "done", "finished", "idle", "exited", "dead": return true
+        default: return false
         }
     }
 
@@ -113,7 +156,15 @@ public actor MachineSession {
             // Resnapshotting per event would cost a round trip each time —
             // ~115ms to a machine across an ssh tunnel — and a chatty agent
             // emits these continuously.
-            patch(pane)
+            //
+            // The output read is the one round trip that remains, and it only
+            // happens for a pane that has actually stopped: a working agent's
+            // output changes constantly and nothing is waiting on it.
+            var output: String?
+            if pane.agent?.isEmpty == false, Self.warrantsOutputRead(pane.agentStatus) {
+                output = try? await client?.readPane(paneId: pane.paneId, lines: 60)
+            }
+            patch(pane, output: output)
 
         case .paneClosed(let paneId):
             agents.removeAll { $0.ref.agent.raw == paneId }
@@ -133,13 +184,16 @@ public actor MachineSession {
 
     /// Apply one pane to the agent list, preserving dwell when the state has
     /// not actually changed.
-    private func patch(_ pane: HerdrPane) {
+    private func patch(_ pane: HerdrPane, output: String?) {
+        var outputs: [String: String] = [:]
+        if let output { outputs[pane.paneId] = output }
+
         let incoming = HerdrSnapshot(
             herdrVersion: herdrVersion ?? "",
             protocolVersion: 0,
             panes: [pane],
             workspaceNames: workspaceNames
-        ).agents(on: machine.id)
+        ).agents(on: machine.id, output: outputs)
 
         // A pane that stopped being an agent — the agent exited but the shell
         // lives on — drops out of the list rather than freezing on its last

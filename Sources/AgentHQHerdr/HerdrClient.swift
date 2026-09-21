@@ -103,6 +103,12 @@ public protocol HerdrClient: Sendable {
     func snapshot() async throws -> HerdrSnapshot
     func events() -> AsyncStream<HerdrEvent>
 
+    /// The tail of one pane's recent output, used to classify what it is
+    /// waiting on. Returns nil when herdr has nothing to give rather than
+    /// throwing — an unreadable pane is a pane we classify from status alone,
+    /// not a failure worth surfacing.
+    func readPane(paneId: String, lines: Int) async throws -> String?
+
     // Interventions. Every one of these travels the same socket as the reads,
     // so they work unchanged over a forwarded tunnel.
     func sendKeys(paneId: String, keys: [String]) async throws
