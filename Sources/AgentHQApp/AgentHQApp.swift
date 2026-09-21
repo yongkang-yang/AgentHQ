@@ -11,6 +11,11 @@ struct AgentHQApp: App {
         MenuBarExtra {
             PanelView(fleet: fleet)
                 .task {
+                    // Before anything connects: an `ssh -N -L` outlives a
+                    // crashed or force-quit AgentHQ, and its leftover socket
+                    // is indistinguishable from a live one.
+                    TunnelReaper.reap()
+
                     // Machines come from herdr's own registry, so adding one
                     // there is all the configuration there is.
                     fleet.importHerdrMachines(
