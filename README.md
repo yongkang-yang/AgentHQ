@@ -100,24 +100,10 @@ swift run AgentHQApp   # development
 `swift build` does not update `AgentHQ.app` — the bundle carries its own
 release build, and only `build-app.sh` refreshes it.
 
-## Milestones
+## Not in scope
 
-1. ~~Skeleton — layering, domain model, LICENSE/NOTICE, DESIGN.md~~ ✅
-2. ~~Remote walking skeleton — a WSL machine over `ssh -L`, live agents, live
-   event push~~ ✅
-3. ~~Local machine as the degenerate case~~ ✅ (fell out of the transport design)
-4. ~~Adopt herdr's machine registry; derive the remote socket path from
-   `session`~~ ✅
-5. ~~Reap tunnels orphaned by a previous run~~ ✅
-6. ~~Normalized state classifier + attention triage~~ ✅
-7. ~~Interventions — approve / decline / reply / nudge / reveal~~ ✅
-8. ~~Machines UI, notification rules~~ ✅
-9. ~~End a conversation from the panel~~ ✅
-10. ~~Notify when a run finishes, carrying what it said~~ ✅
-11. ~~Recover a machine on its own when the network moves under it~~ ✅
-
-Not in v1: usage/cost dashboard, MCP server, detecting agents outside herdr,
-a terminal emulator.
+Usage/cost dashboard, MCP server, detecting agents outside herdr, a terminal
+emulator.
 
 ## License
 
