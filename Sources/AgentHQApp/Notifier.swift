@@ -15,6 +15,13 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
     /// not earned the prompt.
     private static let enabledKey = "notificationsEnabled"
 
+    /// On by default, unlike ``isEnabled`` — it only takes effect once the
+    /// user has turned notifications on at all, so it costs them nothing
+    /// unasked. A user who wants the stuck-agent alerts and not the
+    /// completions turns this one off; the reverse preference is the one the
+    /// product exists to serve, so it is not the one that needs opting in.
+    private static let completionsKey = "notifyOnCompletion"
+
     private var isAuthorized = false
 
     /// Called when a notification is clicked. A nil ref is a notification that
@@ -28,6 +35,15 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
             UserDefaults.standard.set(newValue, forKey: Self.enabledKey)
             if newValue { requestAuthorization() }
         }
+    }
+
+    var announcesCompletions: Bool {
+        get {
+            // `bool(forKey:)` is false for an unset key, so the default has to
+            // be spelled out rather than inherited from UserDefaults.
+            UserDefaults.standard.object(forKey: Self.completionsKey) as? Bool ?? true
+        }
+        set { UserDefaults.standard.set(newValue, forKey: Self.completionsKey) }
     }
 
     func prepare() {
@@ -59,8 +75,7 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         content.sound = .default
         // One agent can be named in the click target. A batch cannot: which of
         // five the user meant is unknowable, so it opens the panel unfocused.
-        if batch.announcements.count == 1,
-           case .agent(let ref, _, _, _, _) = batch.announcements[0].subject {
+        if batch.announcements.count == 1, let ref = batch.announcements[0].subject.ref {
             content.userInfo = ["machine": ref.machine.raw, "pane": ref.agent.raw]
         }
 

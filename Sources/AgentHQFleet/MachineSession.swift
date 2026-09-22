@@ -65,6 +65,21 @@ public actor MachineSession {
     /// last came up. See ``apply(_:)``'s `.connected` case.
     private var hasSyncedSinceConnect = false
 
+    /// Runs this session watched end, and that the user has not looked at yet.
+    ///
+    /// AgentHQ's own copy of the bookkeeping herdr calls `done`. It needs one
+    /// because herdr's `done` means "completed **and unseen**" by *herdr's*
+    /// reckoning, and for a pane the user has focused there it is already
+    /// seen — measured here, a run in a focused pane went `working` (seq 50)
+    /// → `idle` (seq 51) and never reported `done` at all. Waiting for
+    /// `done` left those runs in Idle forever.
+    ///
+    /// herdr's own docs say each client tracks viewed completions
+    /// independently, so this is the arrangement it expects of a client, not
+    /// a second opinion about the same fact. Nothing is fabricated: the
+    /// transition out of `working` is something this session watched happen.
+    private var completedUnseen: Set<AgentID> = []
+
     public init(
         machine: Machine,
         makeClient: @escaping ClientFactory = { LiveHerdrClient(socketPath: $0) },
@@ -259,7 +274,8 @@ public actor MachineSession {
             hasRestoredDwell = true
             restorableDwell = []
         }
-        agents = reconcile(incoming)
+        let previous = Dictionary(agents.map { ($0.ref, $0) }, uniquingKeysWith: { a, _ in a })
+        agents = reconcile(applyCompletions(incoming, previous: previous))
     }
 
     private func readAgentViews(using client: any HerdrClient) async -> [String: HerdrAgentInfo] {
@@ -294,6 +310,39 @@ public actor MachineSession {
             }
             return result
         }
+    }
+
+    /// Promote a run this session watched finish, so it reads as completed
+    /// rather than as an agent that happens to be sitting idle.
+    ///
+    /// Dropped again the moment the row is anything but idle — a new turn, a
+    /// prompt, a crash — and when the user acts on it, which is what
+    /// ``markSeen(_:)`` is for.
+    private func applyCompletions(_ incoming: [Agent], previous: [AgentRef: Agent]) -> [Agent] {
+        incoming.map { agent in
+            let wasWorking = previous[agent.ref]?.state == .working
+            if wasWorking, agent.state == .idle {
+                completedUnseen.insert(agent.ref.agent)
+            } else if agent.state != .idle, agent.state != .finished {
+                completedUnseen.remove(agent.ref.agent)
+            }
+            guard agent.state == .idle, completedUnseen.contains(agent.ref.agent) else {
+                return agent
+            }
+            var promoted = agent
+            promoted.state = .finished
+            return promoted
+        }
+    }
+
+    /// Forget that a run was waiting to be looked at.
+    ///
+    /// Called for every intervention, not only Reveal. Any of them means the
+    /// user has this row in front of them and has dealt with it; leaving it in
+    /// Completed afterwards is the same staleness `done` would have had if
+    /// herdr never cleared it.
+    private func markSeen(_ agentId: AgentID) {
+        completedUnseen.remove(agentId)
     }
 
     /// Carry dwell forward across refreshes.
@@ -408,6 +457,8 @@ public actor MachineSession {
                 try await client.sendText(paneId: agentId.raw, text: trimmed + "\n")
             }
         }
+
+        markSeen(agentId)
 
         // The row should stop offering what it just did, without waiting for
         // herdr to notice and push an event.
@@ -649,12 +700,15 @@ public actor MachineSession {
         var views: [String: HerdrAgentInfo] = [:]
         if let view { views[pane.paneId] = view }
 
-        let incoming = HerdrSnapshot(
+        let decoded = HerdrSnapshot(
             herdrVersion: herdrVersion ?? "",
             protocolVersion: 0,
             panes: [pane],
             workspaceNames: workspaceNames
         ).agents(on: machine.id, output: outputs, agentViews: views)
+
+        let previous = Dictionary(agents.map { ($0.ref, $0) }, uniquingKeysWith: { a, _ in a })
+        let incoming = applyCompletions(decoded, previous: previous)
 
         // A pane that stopped being an agent — the agent exited but the shell
         // lives on — drops out of the list rather than freezing on its last

@@ -145,6 +145,31 @@ design discussion, not a refactor.
    `pane.read` does not mark an agent seen, which is what makes it safe to
    call on every stopped pane.
 
+   **So `done` is not a state a client can wait for.** Measured against
+   herdr 0.9.1, on the same pane, twice:
+
+   - With Ghostty open and that pane focused: 150 samples across two full
+     turns, `working` → `idle` → `working` → `idle`. `done` appeared **zero**
+     times. herdr counts a focused pane as seen the moment the run ends.
+   - With every Ghostty window closed: the same run reported `done` for about
+     five seconds, then `idle` again once a client re-attached.
+
+   And the `done` → `idle` flip happened at an **unchanged
+   `state_change_seq`** (61 both times). The stamp tracks agent state, not
+   seen state, so a client cannot detect the flip by watching it either.
+
+   Which means a completion is only visible to AgentHQ as a **transition it
+   watched**: `working` → a state that takes input (`idle` *or* `finished`).
+   `MachineSession.completedUnseen` records exactly that and promotes the row,
+   and `NotificationPolicy` announces on the same transition. Both are
+   AgentHQ's own bookkeeping, which is what herdr's docs say a client is
+   expected to keep — not a second opinion about herdr's. Nothing is
+   fabricated: the session saw the agent working, and now it is not.
+
+   Clearing it is then AgentHQ's job too, since herdr will go on saying
+   `idle` either way: any intervention on the row calls `markSeen`, and
+   starting a new turn drops it.
+
 10. **Answering a prompt goes through `pane.send_keys`, never `agent.prompt`.**
    `agent.prompt` takes `target`, not `pane_id` — a `pane_id` is rejected with
    `missing field \`target\`` — and it refuses a blocked agent outright with

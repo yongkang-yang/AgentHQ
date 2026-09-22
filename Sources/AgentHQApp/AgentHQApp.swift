@@ -37,6 +37,7 @@ final class AgentHQApp: NSObject, NSApplicationDelegate {
             self?.showPanel()
         }
         fleet.onAnnouncements = { [notifier] batch in notifier.deliver(batch) }
+        fleet.announcesCompletions = notifier.announcesCompletions
 
         let popover = NSPopover()
         popover.behavior = .transient

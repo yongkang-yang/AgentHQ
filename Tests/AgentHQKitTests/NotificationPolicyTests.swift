@@ -27,8 +27,11 @@ private func snapshot(_ views: (MachineID, String, MachineReachability, [Agent])
 @Suite("notification policy")
 struct NotificationPolicyTests {
     /// Runs a sequence of snapshots and returns what each one announced.
-    private func run(_ snapshots: [FleetSnapshot]) -> [AnnouncementBatch] {
-        var policy = NotificationPolicy()
+    private func run(
+        _ snapshots: [FleetSnapshot],
+        announcesCompletions: Bool = true
+    ) -> [AnnouncementBatch] {
+        var policy = NotificationPolicy(announcesCompletions: announcesCompletions)
         return snapshots.map { policy.announcements(for: $0) }
     }
 
@@ -70,18 +73,172 @@ struct NotificationPolicyTests {
         #expect(batches[2].announcements.count == 1)
     }
 
-    @Test("finishing is not worth interrupting anyone")
-    func finishedIsNotAnnounced() {
-        // Good news that can wait for the next time they look. A notification
-        // per completion is most of the noise a fleet produces.
+    /// The premise of a triage panel is that the user is not looking. "The
+    /// thing you were waiting for is done" is the event that most deserves to
+    /// reach them, and it used to be the one state that never did.
+    @Test("a run finishing reaches the user")
+    func finishedIsAnnounced() {
         let batches = run([
             snapshot((local, "this mac", .connected, [agent(local, "p1", .working)])),
             snapshot((local, "this mac", .connected, [agent(local, "p1", .finished)])),
         ])
+        #expect(batches[1].announcements.count == 1)
+    }
+
+    /// The bug this rule exists for, in the shape it was found in.
+    ///
+    /// Measured against herdr 0.9.1: a run in a *focused* pane goes
+    /// `working` → `idle` and never reports `done`, because herdr counts a
+    /// focused pane as already seen. A policy watching for `finished` waits
+    /// for a state that never arrives, so the completion the user was waiting
+    /// on is the one thing that never reaches them.
+    @Test("a run that ends as idle is still a completion")
+    func finishingAsIdleIsAnnounced() {
+        let batches = run([
+            snapshot((local, "this mac", .connected, [agent(local, "p1", .working)])),
+            snapshot((local, "this mac", .connected, [agent(local, "p1", .idle)])),
+        ])
+        #expect(batches[1].announcements.count == 1)
+        #expect(batches[1].announcements.allSatisfy(AnnouncementBatch.isCompletion))
+        #expect(batches[1].title == "claude finished on this mac")
+    }
+
+    /// The other half of the same rule, and the reason it is a transition
+    /// rather than a state: most idle agents are just idle. Announcing the
+    /// state alone would fire for every agent on every machine that has ever
+    /// sat at its prompt.
+    @Test("an agent that was never working is not a completion")
+    func idleWithoutWorkingIsSilent() {
+        let batches = run([
+            snapshot((local, "this mac", .connected, [agent(local, "p1", .needsInput)])),
+            snapshot((local, "this mac", .connected, [agent(local, "p1", .idle)])),
+        ])
         #expect(batches[1].isEmpty)
-        #expect(!NotificationPolicy.announcedStates.contains(.finished))
-        #expect(!NotificationPolicy.announcedStates.contains(.working))
-        #expect(!NotificationPolicy.announcedStates.contains(.unknown))
+    }
+
+    /// Leaving `working` for something that wants a human is that thing, not
+    /// a completion — and must not be announced twice.
+    @Test("working to blocked is a demand, not a completion")
+    func workingToBlockedIsNotACompletion() {
+        let batches = run([
+            snapshot((local, "this mac", .connected, [agent(local, "p1", .working)])),
+            snapshot((local, "this mac", .connected, [agent(local, "p1", .needsApproval)])),
+        ])
+        #expect(batches[1].announcements.count == 1)
+        #expect(!batches[1].announcements.contains(where: AnnouncementBatch.isCompletion))
+    }
+
+    /// A completion is one state entry, not a status that keeps re-firing
+    /// while the run sits there finished — which is what makes announcing it
+    /// affordable. herdr's `done` means "completed and unseen" and the seen
+    /// state lives on the server, so the row does not flap.
+    @Test("a run that stays done is announced once")
+    func finishedAnnouncesOnlyOnEntry() {
+        let batches = run([
+            snapshot((local, "this mac", .connected, [agent(local, "p1", .working)])),
+            snapshot((local, "this mac", .connected, [agent(local, "p1", .finished)])),
+            snapshot((local, "this mac", .connected, [agent(local, "p1", .finished)])),
+            snapshot((local, "this mac", .connected, [agent(local, "p1", .finished)])),
+        ])
+        #expect(batches[1].announcements.count == 1)
+        #expect(batches[2].isEmpty)
+        #expect(batches[3].isEmpty)
+    }
+
+    /// The escape hatch for a herd big enough that completions are noise. It
+    /// turns off completions and nothing else — a stuck agent still gets
+    /// through, because that half of the old rationale was never in doubt.
+    @Test("completions can be turned off without silencing stuck agents")
+    func completionsAreOptional() {
+        let snapshots = [
+            snapshot((local, "this mac", .connected, [
+                agent(local, "p1", .working), agent(local, "p2", .working),
+            ])),
+            snapshot((local, "this mac", .connected, [
+                agent(local, "p1", .finished), agent(local, "p2", .needsInput),
+            ])),
+        ]
+        let quiet = run(snapshots, announcesCompletions: false)
+        #expect(quiet[1].announcements.count == 1)
+        #expect(!quiet[1].announcements.contains(where: AnnouncementBatch.isCompletion))
+
+        #expect(run(snapshots)[1].announcements.count == 2)
+    }
+
+    @Test("neither working nor unknown is ever announced")
+    func runningStatesAreSilent() {
+        for state in [AgentState.working, .unknown, .idle] {
+            let batches = run([
+                snapshot((local, "this mac", .connected, [agent(local, "p1", .needsInput)])),
+                snapshot((local, "this mac", .connected, [agent(local, "p1", state)])),
+            ])
+            #expect(batches[1].isEmpty, "\(state)")
+        }
+    }
+
+    // MARK: What the notification says
+
+    /// A finished run is an event, not a status readout, and it does not
+    /// "need you" — a notification that says so sends the user to deal with
+    /// something that wants nothing from them.
+    @Test("a completion is worded as an event, not as a demand")
+    func completionWording() {
+        let batches = run([
+            snapshot((local, "this mac", .connected, [agent(local, "p1", .working)])),
+            snapshot((local, "this mac", .connected, [agent(local, "p1", .finished)])),
+        ])
+        #expect(batches[1].title == "claude finished on this mac")
+        #expect(!batches[1].title.contains("need"))
+    }
+
+    /// The mixed batch is the common one on a busy herd, and the one where a
+    /// single wrong verb costs the most: it is the case where some agents
+    /// really are waiting and some are merely done.
+    @Test("a mixed batch counts the two kinds separately")
+    func mixedBatchWording() {
+        let batches = run([
+            snapshot((local, "this mac", .connected, [
+                agent(local, "p1", .working),
+                agent(local, "p2", .working),
+                agent(local, "p3", .working),
+            ])),
+            snapshot((local, "this mac", .connected, [
+                agent(local, "p1", .finished),
+                agent(local, "p2", .needsInput),
+                agent(local, "p3", .needsApproval),
+            ])),
+        ])
+        #expect(batches[1].title == "2 agents need you, 1 finished on this mac")
+    }
+
+    @Test("a batch of nothing but completions says so")
+    func allFinishedWording() {
+        let batches = run([
+            snapshot((local, "this mac", .connected, [
+                agent(local, "p1", .working), agent(local, "p2", .working),
+            ])),
+            snapshot((local, "this mac", .connected, [
+                agent(local, "p1", .finished), agent(local, "p2", .finished),
+            ])),
+        ])
+        #expect(batches[1].title == "2 runs finished on this mac")
+    }
+
+    /// What makes a completion notification worth having rather than merely
+    /// true: the run's last words travel with it, so the user learns the
+    /// answer without opening anything.
+    @Test("a completion carries what the run actually said")
+    func completionCarriesItsMessage() {
+        var policy = NotificationPolicy()
+        _ = policy.announcements(for: snapshot(
+            (local, "this mac", .connected, [agent(local, "p1", .working)])
+        ))
+        var done = agent(local, "p1", .finished)
+        done.message = "All 239 tests passed."
+        let batch = policy.announcements(for: snapshot(
+            (local, "this mac", .connected, [done])
+        ))
+        #expect(batch.body == "All 239 tests passed.")
     }
 
     @Test("a stalled herd is announced even though the user cannot clear it")

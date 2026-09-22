@@ -28,6 +28,15 @@ public final class FleetStore {
     /// when the fleet changed.
     public var onAnnouncements: (@MainActor (AnnouncementBatch) -> Void)?
 
+    /// Whether a finished run is worth a notification. Set from the user's
+    /// preference; the policy still owns every other question of whether to
+    /// say something, which is what keeps those rules testable without a
+    /// notification centre.
+    public var announcesCompletions: Bool {
+        get { notificationPolicy.announcesCompletions }
+        set { notificationPolicy.announcesCompletions = newValue }
+    }
+
     public init() {}
 
     // MARK: - Lifecycle

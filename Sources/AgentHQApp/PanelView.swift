@@ -151,6 +151,22 @@ struct PanelView: View {
                 .toggleStyle(.checkbox)
                 .font(Brand.body)
                 .help("Notify when an agent needs you, or a machine stops answering")
+
+                // Only while notifications are on at all, because on its own
+                // it controls nothing and reads as a second thing that is
+                // broken.
+                if notifier.isEnabled {
+                    Toggle("on finish", isOn: Binding(
+                        get: { notifier.announcesCompletions },
+                        set: {
+                            notifier.announcesCompletions = $0
+                            fleet.announcesCompletions = $0
+                        }
+                    ))
+                    .toggleStyle(.checkbox)
+                    .font(Brand.body)
+                    .help("Also notify when a run finishes, with what it said")
+                }
                 Spacer()
                 Button("Quit") { NSApplication.shared.terminate(nil) }
                     .font(Brand.body)
