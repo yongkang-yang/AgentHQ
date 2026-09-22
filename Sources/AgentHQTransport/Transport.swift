@@ -38,6 +38,16 @@ public protocol Transport: Actor {
 
     /// Tear the socket down and release anything holding it open.
     func deactivate() async
+
+    /// Whether the path ``activate()`` returned is still carrying traffic.
+    ///
+    /// Distinguishes the two failures that look identical from above: the
+    /// subscription's socket hiccuped and will come back on its own, or the
+    /// thing that was serving that path is gone and no amount of resubscribing
+    /// will find it. Only the second one needs the transport rebuilt, and
+    /// rebuilding on the first would throw away a recovery that was already
+    /// working.
+    func isHealthy() async -> Bool
 }
 
 // MARK: - Socket path limits

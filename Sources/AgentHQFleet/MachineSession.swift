@@ -15,6 +15,7 @@ public actor MachineSession {
     private let transport: any Transport
     private var client: (any HerdrClient)?
     private var eventTask: Task<Void, Never>?
+    private var supervisorTask: Task<Void, Never>?
 
     private var reachability: MachineReachability
     private var agents: [Agent] = []
@@ -33,6 +34,28 @@ public actor MachineSession {
 
     private let makeClient: ClientFactory
 
+    /// How often the supervisor looks at a machine that is not working.
+    ///
+    /// Injected for the same reason the client factory is: the supervisor's
+    /// whole job happens on a timer, and a test that had to sleep out the real
+    /// interval could not assert on it at all.
+    private let supervisionInterval: Duration
+
+    /// The ceiling the supervisor's backoff grows to while a machine keeps
+    /// refusing. Relaunching `ssh` every few seconds against a host that is
+    /// not there costs a process spawn and a name lookup per attempt, forever.
+    private var maxSupervisionInterval: Duration { supervisionInterval * 10 }
+
+    /// True while a rebuild is out on the network, so a supervisor tick that
+    /// fires mid-rebuild does not start a second one.
+    private var isRebuilding = false
+
+    /// Bumped by anything that invalidates a connection attempt already in
+    /// flight. A `stop` or a rebuild can overtake an `activate` that is still
+    /// waiting on `ssh`, and the attempt that lands second must not install its
+    /// client over the decision that overtook it.
+    private var generation: UInt64 = 0
+
     /// Entry times remembered from a previous launch, applied once when this
     /// machine's herd is first read.
     private var restorableDwell: [DwellRecord] = []
@@ -44,12 +67,15 @@ public actor MachineSession {
 
     public init(
         machine: Machine,
-        makeClient: @escaping ClientFactory = { LiveHerdrClient(socketPath: $0) }
+        makeClient: @escaping ClientFactory = { LiveHerdrClient(socketPath: $0) },
+        transport: (any Transport)? = nil,
+        supervisionInterval: Duration = .seconds(3)
     ) {
         self.machine = machine
-        self.transport = machine.transport.makeTransport(for: machine.id)
+        self.transport = transport ?? machine.transport.makeTransport(for: machine.id)
         self.reachability = machine.isEnabled ? .connecting : .disabled
         self.makeClient = makeClient
+        self.supervisionInterval = supervisionInterval
     }
 
     /// Hand this machine the dwell figures from last launch, before it starts.
@@ -68,15 +94,44 @@ public actor MachineSession {
     public func start() async {
         guard machine.isEnabled else {
             reachability = .disabled
+            supervisorTask?.cancel()
+            supervisorTask = nil
             return
         }
+        startSupervisor()
+        await connect()
+    }
+
+    public func stop() async {
+        supervisorTask?.cancel()
+        supervisorTask = nil
+        await teardown()
+        reachability = machine.isEnabled ? .connecting : .disabled
+        // Agents are kept, not cleared: the last known list is what the UI
+        // shows as stale. Clearing it would make a dropped tunnel look like
+        // every agent vanished.
+    }
+
+    /// Bring the transport up, speak herdr over it, and start listening.
+    private func connect() async {
         reachability = .connecting
+        generation &+= 1
+        let attempt = generation
 
         do {
             let socketPath = try await transport.activate()
             let client = makeClient(socketPath)
             let handshake = try await client.handshake()
             try await client.connect()
+
+            // `activate` can sit on `ssh` for twenty seconds, and a `stop` or a
+            // second rebuild can land inside that window. Installing this
+            // client now would leave a live subscription and a `connected`
+            // badge behind a session that has already been told to go down.
+            guard attempt == generation else {
+                await client.disconnect()
+                return
+            }
 
             self.client = client
             self.herdrVersion = handshake.version
@@ -85,6 +140,7 @@ public actor MachineSession {
             hasSyncedSinceConnect = true
             startEventLoop(client)
         } catch {
+            guard attempt == generation else { return }
             // The reason is shown verbatim in the panel. Transport errors
             // already read as sentences ("build-box accepted the tunnel but
             // nothing is listening on …"), which is why they are not wrapped
@@ -93,17 +149,97 @@ public actor MachineSession {
         }
     }
 
-    public func stop() async {
+    /// Drop the live connection without touching the supervisor, which has to
+    /// outlive the thing it supervises.
+    private func teardown() async {
+        generation &+= 1
         eventTask?.cancel()
         eventTask = nil
         hasSyncedSinceConnect = false
         await client?.disconnect()
         client = nil
         await transport.deactivate()
-        reachability = machine.isEnabled ? .connecting : .disabled
-        // Agents are kept, not cleared: the last known list is what the UI
-        // shows as stale. Clearing it would make a dropped tunnel look like
-        // every agent vanished.
+    }
+
+    // MARK: - Supervision
+
+    /// What one supervisor tick did, which is all the loop needs to know to
+    /// decide how long to wait before the next one.
+    private enum Supervision {
+        /// The machine is working, or is already being dealt with.
+        case nothingToDo
+        /// A rebuild put the machine back.
+        case recovered
+        /// A rebuild was tried and the machine still is not answering.
+        case failed
+    }
+
+    /// Watch this machine for as long as it is enabled, and rebuild it when
+    /// the thing underneath its socket has gone away.
+    ///
+    /// This is the only thing in the app that calls `activate` more than once,
+    /// and without it a machine reached over `ssh` never comes back from a
+    /// network change. The failure is worth spelling out, because every part
+    /// of it looks like it is working:
+    ///
+    /// The Mac changes networks. `ssh` notices through `ServerAliveCountMax`
+    /// and exits, taking the forwarded socket with it. The subscription's read
+    /// ends, so the client backs off and resubscribes — to a path with nothing
+    /// behind it, forever, at a ten-second ceiling. The session reports
+    /// `reconnecting`, honestly and permanently, because `activate` ran once
+    /// inside `start` and nothing was ever going to run it again. The far side
+    /// coming back changes none of this: there is no `ssh` left to carry it.
+    /// Quitting and relaunching was the only recovery, which is exactly how it
+    /// was found.
+    private func startSupervisor() {
+        guard supervisorTask == nil else { return }
+        let interval = supervisionInterval
+        let ceiling = maxSupervisionInterval
+        supervisorTask = Task { [weak self] in
+            var wait = interval
+            while !Task.isCancelled {
+                try? await Task.sleep(for: wait)
+                guard !Task.isCancelled, let self else { return }
+                switch await self.superviseOnce() {
+                case .failed:
+                    wait = min(wait * 2, ceiling)
+                case .nothingToDo, .recovered:
+                    wait = interval
+                }
+            }
+        }
+    }
+
+    /// One look at the machine.
+    private func superviseOnce() async -> Supervision {
+        guard machine.isEnabled, !isRebuilding else { return .nothingToDo }
+
+        switch reachability {
+        case .disabled, .connecting, .connected:
+            // `connecting` included: a rebuild or a first connect is already
+            // out on the network, and a second one would race it.
+            return .nothingToDo
+
+        case .reconnecting:
+            // The client resubscribes on its own, and where the socket still
+            // has a herdr behind it that is both cheaper and faster than
+            // anything here — a herd restarting on the far side recovers
+            // without the tunnel being touched. What it cannot recover from is
+            // the socket having no server at all, which is the only case this
+            // takes over.
+            if await transport.isHealthy() { return .nothingToDo }
+
+        case .unreachable:
+            // Nothing else retries this. A machine that was down when AgentHQ
+            // launched stayed down until the user pressed Retry.
+            break
+        }
+
+        isRebuilding = true
+        defer { isRebuilding = false }
+        await teardown()
+        await connect()
+        return reachability.isConnected ? .recovered : .failed
     }
 
     /// Pull a full snapshot and replace the agent list.

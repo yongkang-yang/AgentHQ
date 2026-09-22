@@ -125,6 +125,35 @@ design discussion, not a refactor.
 12. **No continuous animation inside `MenuBarExtra`.** It causes the panel to
     flicker open and closed. Emphasis is static.
 
+13. **A live subscription is not a live transport, and `activate` runs more
+    than once.** `MachineSession` supervises both, separately, because each
+    recovers from something the other cannot.
+
+    The event subscription retries its own socket path forever with backoff.
+    That is the right recovery for a herd restarting on the far side — the
+    path still has a server behind it — and it is no recovery at all for the
+    path itself going away. When the Mac changes networks, `ssh` exits on
+    `ServerAliveCountMax` and takes the forwarded socket with it; the
+    subscription then resubscribes to nothing, at a ten-second ceiling,
+    indefinitely, while the session reports `reconnecting` — honestly, and
+    permanently. The far side coming back changes nothing: there is no `ssh`
+    left to carry it.
+
+    So the supervisor asks `Transport.isHealthy()` before acting, and only
+    rebuilds the transport when the socket has no server. It also retries
+    `unreachable`, which nothing else did: a machine that was not routable at
+    launch stayed that way until the user pressed Retry.
+
+    Two consequences to preserve:
+
+    - `LocalSocketTransport.isHealthy()` returns `true` unconditionally. A
+      stopped local herdr is not a broken transport, and tearing the client
+      down would replace a free recovery with a worse one.
+    - `connect()` carries a generation stamp. `activate` can sit on `ssh` for
+      twenty seconds, and a `stop` or a second rebuild can land inside that
+      window; the attempt that finishes second must not install its client
+      over the decision that overtook it.
+
 ## Style
 
 Four-space indent, standard Swift API naming. Preserve Swift 6 concurrency

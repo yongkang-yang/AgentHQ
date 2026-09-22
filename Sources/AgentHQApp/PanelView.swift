@@ -189,7 +189,7 @@ private struct MachineRow: View {
 
             Spacer()
 
-            if isDown {
+            if canRetry {
                 // Rather than waiting out a reconnect cycle while looking at
                 // a machine you know is back.
                 Button("Retry") { fleet.retry(view.machine.id) }
@@ -212,9 +212,23 @@ private struct MachineRow: View {
         }
     }
 
+    /// A failure the user is being asked to look at. `reconnecting` is not
+    /// one — see ``MachineReachability/isTransient``.
     private var isDown: Bool {
         if case .unreachable = view.reachability { return true }
         return false
+    }
+
+    /// Offered for a reconnect too, not just a failure. The supervisor now
+    /// backs off to half a minute between attempts, and the comment above
+    /// about not waiting out a cycle applies most to the state that says
+    /// "reconnecting (14)" — which is the one the button used to be missing
+    /// from. `connecting` is excluded because an attempt is already running.
+    private var canRetry: Bool {
+        switch view.reachability {
+        case .connected, .connecting, .disabled: return false
+        case .reconnecting, .unreachable:        return true
+        }
     }
 
     private var dotColor: Color {

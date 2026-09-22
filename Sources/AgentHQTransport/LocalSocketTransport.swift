@@ -25,6 +25,14 @@ public actor LocalSocketTransport: Transport {
     }
 
     public func deactivate() async {}
+
+    /// Always healthy, because there is nothing of ours between the app and
+    /// the socket to fail. Whether herdr itself is up is a different question,
+    /// and not this type's to answer: the client's own resubscribe loop asks
+    /// it continuously, against this same path, for free. Reporting a stopped
+    /// herdr as an unhealthy transport would replace that free recovery with a
+    /// teardown and rebuild that cannot do any better.
+    public func isHealthy() -> Bool { true }
 }
 
 // MARK: - Default resolution
