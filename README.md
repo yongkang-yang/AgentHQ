@@ -14,11 +14,15 @@ AgentHQ is **attention-first**, not a process list. Agents that are blocked,
 waiting for approval, failed, rate-limited, or finished come first; working
 agents stay visible but secondary.
 
+![The AgentHQ panel showing a finished run under Completed, and the machines it is watching](docs/panel.png)
+
 Status: **working.** It builds as a menu-bar app, imports machines from
 herdr's own registry, tunnels to them over SSH, classifies what each agent is
-waiting on, and can answer, decline, interrupt, nudge or reveal one from the panel. It
-notifies when an agent needs you or a machine stops answering.
-Verified end to end against a local herdr and a WSL host over Tailscale.
+waiting on, and can answer, decline, reply, nudge, reveal or end one from the
+panel. It notifies when an agent needs you, when a run finishes — with what
+the run actually said — and when a machine stops answering. Machines that go
+down recover on their own. Verified end to end against a local herdr and a
+WSL host over Tailscale.
 
 `ssh -L` unix-socket forwarding is verified against a WSL2 host over
 Tailscale: usable 0.3s after launch, two concurrent connections served
@@ -77,7 +81,7 @@ Two invariants worth knowing before reading the code:
 - macOS 14+
 - Swift 6 toolchain (Xcode 16+)
 - [herdr](https://herdr.dev) on every machine you want to watch
-  (verified against herdr 0.9.0, wire protocol 22)
+  (verified against herdr 0.9.1, wire protocol 22)
 - OpenSSH 6.7+ for remote machines (unix-socket forwarding)
 - Ghostty 1.3+ for Reveal to bring a conversation to the front. On this Mac it
   focuses the Ghostty surface already running herdr; for a remote machine it
@@ -89,8 +93,12 @@ Two invariants worth knowing before reading the code:
 ```sh
 swift build
 swift test
-swift run AgentHQApp
+swift run AgentHQApp   # development
+./build-app.sh         # AgentHQ.app, the installed menu-bar bundle
 ```
+
+`swift build` does not update `AgentHQ.app` — the bundle carries its own
+release build, and only `build-app.sh` refreshes it.
 
 ## Milestones
 
@@ -102,8 +110,11 @@ swift run AgentHQApp
    `session`~~ ✅
 5. ~~Reap tunnels orphaned by a previous run~~ ✅
 6. ~~Normalized state classifier + attention triage~~ ✅
-7. ~~Interventions — approve / decline / interrupt / nudge~~ ✅
+7. ~~Interventions — approve / decline / reply / nudge / reveal~~ ✅
 8. ~~Machines UI, notification rules~~ ✅
+9. ~~End a conversation from the panel~~ ✅
+10. ~~Notify when a run finishes, carrying what it said~~ ✅
+11. ~~Recover a machine on its own when the network moves under it~~ ✅
 
 Not in v1: usage/cost dashboard, MCP server, detecting agents outside herdr,
 a terminal emulator.
