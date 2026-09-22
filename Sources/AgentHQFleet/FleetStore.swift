@@ -10,12 +10,17 @@ import Observation
 @MainActor
 @Observable
 public final class FleetStore {
+    static let localMachineID = MachineID("agenthq-local")
+
     public private(set) var snapshot: FleetSnapshot = .empty
 
     private var sessions: [MachineID: MachineSession] = [:]
     private var refreshTask: Task<Void, Never>?
     private var hasStarted = false
     private var notificationPolicy = NotificationPolicy()
+    private let dwellStore = DwellStore()
+    private var restorableDwell: [DwellRecord] = []
+    private var dwellSaveRevision: UInt64 = 0
 
     /// Called with whatever the policy decided is worth saying, after each
     /// refresh. The store does not know what a notification is; it only knows
@@ -37,8 +42,17 @@ public final class FleetStore {
         // force-quit AgentHQ, and its leftover socket is indistinguishable
         // from a live one.
         TunnelReaper.reap()
-        importHerdrMachines(includingLocal: localSocketPath)
-        startRefreshLoop()
+
+        // Read before any machine connects, so the first herd each one reads
+        // can be stamped with what it was waiting on last time.
+        Task { [weak self] in
+            let records = await self?.dwellStore.load() ?? []
+            await MainActor.run { self?.restorableDwell = records }
+            await MainActor.run {
+                self?.importHerdrMachines(includingLocal: localSocketPath)
+                self?.startRefreshLoop()
+            }
+        }
     }
 
     /// Stop polling. The sessions keep their tunnels; use `remove` to close one.
@@ -75,6 +89,7 @@ public final class FleetStore {
     ) {
         if let localSocketPath, !sessions.values.contains(where: { $0.machine.transport.isLocal }) {
             add(Machine(
+                id: Self.localMachineID,
                 displayName: "This Mac",
                 transport: .local(socketPath: localSocketPath)
             ))
@@ -87,7 +102,9 @@ public final class FleetStore {
     public func add(_ machine: Machine) {
         let session = MachineSession(machine: machine)
         sessions[machine.id] = session
+        let records = restorableDwell
         Task { [weak self] in
+            await session.prime(dwell: records)
             await session.start()
             await self?.refresh()
         }
@@ -156,5 +173,8 @@ public final class FleetStore {
 
         let batch = notificationPolicy.announcements(for: snapshot)
         if !batch.isEmpty { onAnnouncements?(batch) }
+
+        dwellSaveRevision &+= 1
+        await dwellStore.save(snapshot, revision: dwellSaveRevision)
     }
 }

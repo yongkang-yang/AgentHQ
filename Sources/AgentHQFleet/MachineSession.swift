@@ -33,6 +33,11 @@ public actor MachineSession {
 
     private let makeClient: ClientFactory
 
+    /// Entry times remembered from a previous launch, applied once when this
+    /// machine's herd is first read.
+    private var restorableDwell: [DwellRecord] = []
+    private var hasRestoredDwell = false
+
     public init(
         machine: Machine,
         makeClient: @escaping ClientFactory = { LiveHerdrClient(socketPath: $0) }
@@ -41,6 +46,11 @@ public actor MachineSession {
         self.transport = machine.transport.makeTransport(for: machine.id)
         self.reachability = machine.isEnabled ? .connecting : .disabled
         self.makeClient = makeClient
+    }
+
+    /// Hand this machine the dwell figures from last launch, before it starts.
+    public func prime(dwell records: [DwellRecord]) {
+        restorableDwell = records.filter { $0.ref.machine == machine.id }
     }
 
     /// The machine as the fleet currently sees it.
@@ -100,9 +110,13 @@ public actor MachineSession {
         // stamps live on herdr's agent view and the snapshot's pane records do
         // not carry them. Without it every intervention would be unguarded.
         let stateSeqs = await readStateSeqs(using: client)
-        agents = reconcile(
-            snapshot.agents(on: machine.id, output: output, stateSeqs: stateSeqs)
-        )
+        var incoming = snapshot.agents(on: machine.id, output: output, stateSeqs: stateSeqs)
+        if !hasRestoredDwell, !incoming.isEmpty {
+            incoming = DwellMemory.restore(incoming, from: restorableDwell)
+            hasRestoredDwell = true
+            restorableDwell = []
+        }
+        agents = reconcile(incoming)
     }
 
     private func readStateSeqs(using client: any HerdrClient) async -> [String: UInt64] {
@@ -143,13 +157,16 @@ public actor MachineSession {
 
     /// Carry dwell forward across refreshes.
     ///
-    /// `stateEnteredAt` has to survive a resnapshot, or every refresh resets
-    /// every timer and the panel reports that nothing has been waiting longer
-    /// than one poll interval.
+    /// `stateEnteredAt` has to survive an unchanged resnapshot, or every
+    /// refresh resets every timer. The sequence also has to agree: an agent
+    /// can leave a state and return to it between snapshots.
     private func reconcile(_ incoming: [Agent]) -> [Agent] {
         let previous = Dictionary(agents.map { ($0.ref, $0) }, uniquingKeysWith: { a, _ in a })
         return incoming.map { agent in
-            guard let old = previous[agent.ref], old.state == agent.state else { return agent }
+            guard let old = previous[agent.ref],
+                  old.state == agent.state,
+                  old.stateSeq == agent.stateSeq
+            else { return agent }
             var carried = agent
             carried.stateEnteredAt = old.stateEnteredAt
             return carried
@@ -375,7 +392,13 @@ public actor MachineSession {
         if let index = agents.firstIndex(where: { $0.ref == agent.ref }) {
             var updated = agent
             if agents[index].state == agent.state {
-                updated.stateEnteredAt = agents[index].stateEnteredAt
+                let old = agents[index]
+                if agent.stateSeq == nil || agent.stateSeq == old.stateSeq {
+                    // Working-pane events have no stamp. Keep the last one
+                    // until a full resync or stopped-pane read can compare it.
+                    updated.stateEnteredAt = old.stateEnteredAt
+                    if updated.stateSeq == nil { updated.stateSeq = old.stateSeq }
+                }
             }
             agents[index] = updated
         } else {
