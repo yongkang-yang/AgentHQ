@@ -83,10 +83,42 @@ Two invariants worth knowing before reading the code:
 - [herdr](https://herdr.dev) on every machine you want to watch
   (verified against herdr 0.9.1, wire protocol 22)
 - OpenSSH 6.7+ for remote machines (unix-socket forwarding)
-- Ghostty 1.3+ for Reveal to bring a conversation to the front. On this Mac it
-  focuses the Ghostty surface already running herdr; for a remote machine it
-  opens or reuses a Ghostty window attached to that machine. macOS will ask for
-  permission to let AgentHQ control Ghostty on the first use.
+
+### Machines
+
+This Mac needs nothing beyond a running herdr — AgentHQ finds its socket and
+lists it as "This Mac".
+
+Every other machine has to be registered with herdr **on this Mac** first:
+
+```sh
+herdr machine add --label wsl <ssh-target>
+```
+
+AgentHQ imports them from herdr's own registry, so there is no second list to
+keep in sync: add a machine in herdr and it appears in the panel, already
+carrying herdr's id for it. That registry is internal herdr state rather than
+a published API, so it is treated as an import source — if it is missing or
+its schema changes, you get no imported machines rather than an error.
+
+The ssh target is resolved by ssh itself, so key selection, jump hosts and
+ports belong in `~/.ssh/config` under that alias — including for WSL, which
+is an ordinary entry here.
+
+### Terminals
+
+Any terminal. Watching agents, notifications, and every action except Reveal
+go through herdr's socket and never touch the terminal herdr is running in.
+
+**Reveal is the exception, and today it is Ghostty-only** — the AppleScript
+addresses `com.mitchellh.ghostty` by bundle id. Under another terminal the
+herdr half of a reveal still happens (the pane is focused in herdr's own
+server) but AgentHQ cannot raise the window, so the row reports a Ghostty
+error instead of a confirmation. Nothing else is affected.
+
+With Ghostty 1.3+: on this Mac it focuses the surface already running herdr;
+for a remote machine it opens or reuses a window attached to that machine.
+macOS asks permission to let AgentHQ control Ghostty on first use.
 
 ## Build
 
