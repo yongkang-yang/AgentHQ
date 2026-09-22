@@ -110,15 +110,21 @@ is an ordinary entry here.
 Any terminal. Watching agents, notifications, and every action except Reveal
 go through herdr's socket and never touch the terminal herdr is running in.
 
-**Reveal is the exception, and today it is Ghostty-only** — the AppleScript
-addresses `com.mitchellh.ghostty` by bundle id. Under another terminal the
-herdr half of a reveal still happens (the pane is focused in herdr's own
-server) but AgentHQ cannot raise the window, so the row reports a Ghostty
-error instead of a confirmation. Nothing else is affected.
+**Reveal is the exception: Ghostty 1.3+ only.** The AppleScript addresses
+`com.mitchellh.ghostty` by bundle id, so no other terminal is supported
+today. Under one, the herdr half of a reveal still happens — the pane is
+focused in herdr's own server — but AgentHQ cannot raise the window, so the
+row reports a Ghostty error instead of a confirmation. Nothing else is
+affected.
 
-With Ghostty 1.3+: on this Mac it focuses the surface already running herdr;
-for a remote machine it opens or reuses a window attached to that machine.
-macOS asks permission to let AgentHQ control Ghostty on first use.
+With Ghostty: on this Mac it focuses the surface already running herdr; for a
+remote machine it opens or reuses a window attached to that machine. macOS
+asks permission to let AgentHQ control Ghostty on first use.
+
+Want another terminal supported?
+[Open an issue](https://github.com/yongkang-yang/AgentHQ/issues) — each one
+needs its own way of being raised, so it is a per-terminal addition rather
+than a setting.
 
 ## Build
 
