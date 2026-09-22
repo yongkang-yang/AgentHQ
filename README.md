@@ -1,5 +1,7 @@
 # AgentHQ
 
+![AgentHQ — a macOS menubar hub for monitoring and controlling AI agents, showing a finished run under Completed and the machines it is watching](docs/hero.png)
+
 A native macOS menu-bar app for seeing AI coding agents running across every
 machine you work on — this Mac, remote Linux/macOS hosts over SSH, and Windows
 machines through WSL — in one place.
@@ -13,8 +15,6 @@ It answers three questions at a glance:
 AgentHQ is **attention-first**, not a process list. Agents that are blocked,
 waiting for approval, failed, rate-limited, or finished come first; working
 agents stay visible but secondary.
-
-![The AgentHQ panel showing a finished run under Completed, and the machines it is watching](docs/panel.png)
 
 Status: **working.** It builds as a menu-bar app, imports machines from
 herdr's own registry, tunnels to them over SSH, classifies what each agent is
