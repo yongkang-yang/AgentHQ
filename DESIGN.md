@@ -161,7 +161,9 @@ face.
 - **Title** (700, 15pt) — panel title.
 - **Body** (500, 12.5pt) — reasons, action summaries. 13.5pt semibold for the
   agent name line.
-- **Label** (600, 10.5pt, 0.4pt tracking) — section titles, pills (uppercased).
+- **Label** (600, 10.5pt, 0.4pt tracking) — pills (uppercased), buttons.
+- **Section header** (600, 11.5pt) — sentence case with a mono count, as
+  macOS 26 menus head their sections.
 - **Mono** (500, 10.5pt) — dwell, machine names, paths, params.
 
 **The Measured-Data Rule.** Anything measured is monospaced: dwell durations,
@@ -201,22 +203,46 @@ ambient furniture.
 
 ## Components
 
-- **Agent row** — 10pt continuous corner, 2.5% primary fill (6% hover), 1pt
+- **Agent row** — 12pt continuous corner (concentric with the popover at the
+  14pt gutter), 3.5% primary fill (6% hover), 1pt
   accent-tinted hairline. Left status rail, 3.5pt capsule in the state color.
   Stale rows (machine not connected) drop to 50% opacity and lose their
   actions — visible, clearly not current, not clickable.
-- **State pill** — capsule, uppercased 10.5pt semibold, 14% status fill, 0.5pt
-  hairline at 28%, strengthened text variant.
-- **Machine chip** — monospaced 10.5pt, white on a solid per-machine colour.
-  Machines are an identity axis, so the fill is a stable colour derived from
-  the machine id, not the state palette and not a status signal. It is the one
-  filled chip on a row: the state pill stays a 14% wash, which is what keeps
-  "which box" from reading as "what state". Machine trouble still overrides
+- **State pill** — capsule, uppercased 10.5pt semibold, solid state colour
+  with white text (near-black in dark mode, where the state colours are too
+  light to carry white). The one filled chip on a row.
+- **Machine chip** — monospaced 10.5pt, primary text on a 20% wash of a
+  per-machine colour with a 0.5pt hairline at 45%. Machines are an identity
+  axis, so the colour is stable per machine id, not the state palette and not
+  a status signal. It is a wash where the state pill is solid, which is what
+  keeps "which box" from reading as "what state" — and keeps the machine,
+  which is context, quieter than the state, which is the news. Machine trouble still overrides
   nothing here — it is the status strip and dot that turn Machine Down Orange.
-- **Machine status strip** — only present when a machine is in trouble. Names
-  the machine and the reason verbatim ("build-box unreachable — ssh exited").
-- **Buttons** — 7pt radius. Approve uses Approve Fill navy with a white label;
-  deny is bordered-prominent in Alarm Red; secondary actions are bordered.
+- **Machine strip** — folded by default to one line: a reachability dot per
+  machine, the count, and the name of any machine not simply connected
+  ("build-box unreachable"), in Machine Down Orange when one is down. Unfolds
+  to a row per machine with the reason verbatim. Folding never hides trouble.
+- **Menu bar indicator** — the robot mark, then the most urgent state and its
+  count. A state that wants the user (Needs you, finished) is a solid capsule
+  with the glyph and count knocked out; working is the same glyph and count,
+  bare. The difference is in silhouette because a template image has no
+  colour, and an 8.5pt glyph's interior is not a difference anyone can see.
+- **Buttons** — Liquid Glass capsules on macOS 26+, small control size, one
+  `GlassEffectContainer` per action row. Committing actions (Approve, Send,
+  Confirm) are prominent glass in a fixed blue that holds white text in both
+  appearances; End's confirmation is prominent in Alarm red; everything else is
+  clear glass with the tint on the label — End red (`#B91C1C` / `#F87171`),
+  Continue and Nudge green (`#15803D` / `#4ADE80`), Reveal orange
+  (`#C2410C` / `#FB923C`), each its own token. Before macOS 26, a 14% tinted
+  capsule wash.
+
+## Liquid Glass
+
+Glass is the control layer, never the content. The popover is glass on
+macOS 26, so rows, pills and chips stay tonal fills on it — glass on glass
+reads as noise, and a glass card reads as a button. Only what the user presses
+floats. Separators are inset; the list's scroll edges soften under a `.soft`
+scroll-edge effect instead of a hard rule. Toggles are mini switches.
 
 ## Do's and don'ts
 

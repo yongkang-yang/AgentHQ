@@ -19,7 +19,7 @@ struct MenuBarLabelTests {
         #expect(image.size.height > 0)
     }
 
-    @Test("a resting fleet draws the mark alone — no badge, no count")
+    @Test("a resting fleet draws the mark alone — no indicator, no count")
     @MainActor
     func restingIsNarrower() throws {
         func width(_ signal: FleetSignal) throws -> CGFloat {
@@ -40,6 +40,16 @@ struct MenuBarLabelTests {
             menuBarAgents: [MenuBarAgent(ref: ref, state: .needsInput)]
         )
         #expect(try width(idle) < width(busy))
+    }
+
+    /// The whole point of the indicator: "go and look" and "still going" must
+    /// differ in silhouette, not in a glyph's interior.
+    @Test("a state that wants the user is filled; working is not")
+    func fillMarksAttention() {
+        #expect(StateIndicator(state: .finished, count: 1).isFilled)
+        #expect(StateIndicator(state: .needsInput, count: 1).isFilled)
+        #expect(StateIndicator(state: .crashed, count: 1).isFilled)
+        #expect(!StateIndicator(state: .working, count: 1).isFilled)
     }
 
     @Test("an empty fleet still draws a symbol")

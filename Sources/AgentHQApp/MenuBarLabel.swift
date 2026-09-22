@@ -10,11 +10,20 @@ import SwiftUI
 /// before finished before working before idle — so the number that appears is
 /// always the one that wants a human first.
 ///
+/// The state is told by the *shape* of the indicator, not by a glyph inside
+/// it. The first version badged the robot's corner with the state's symbol at
+/// 8.5pt, and at that size working's ellipsis and finished's checkmark were
+/// the same filled dot: the one distinction the bar most needs to make —
+/// "still going" versus "go and look" — came down to a few pixels of interior.
+/// Now a state that wants the user is a solid capsule and one that does not is
+/// bare text, which reads from across the room.
+///
 /// Everything here draws in black on a clear background and the whole render
 /// is handed to the bar as a template image. Nothing in this view chooses a
 /// colour, because the bar's tint is not this view's to choose: macOS inverts
 /// a template for the dark bar and again for the highlighted item, which is
-/// three appearances the view would otherwise have to guess at.
+/// three appearances the view would otherwise have to guess at. Shape is the
+/// only channel a template has, which is why the difference is spent there.
 struct MenuBarLabel: View {
     let signal: FleetSignal
 
@@ -30,21 +39,21 @@ struct MenuBarLabel: View {
     }
 
     var body: some View {
-        HStack(spacing: 2) {
-            MenuBarMark(badge: isResting ? nil : top?.state)
+        HStack(alignment: .robotFace, spacing: 4) {
+            RobotHead()
+                .frame(width: MenuBarMetrics.mark, height: MenuBarMetrics.mark)
+                .alignmentGuide(.robotFace) { $0.height * MarkGeometry.headCentre }
 
             if let top, !isResting {
-                Text("\(top.count)")
-                    .font(.system(size: 11, weight: .semibold))
-                    .monospacedDigit()
+                StateIndicator(state: top.state, count: top.count)
             }
 
             // Machine trouble is not agent state (invariant 2), so it gets its
-            // own mark rather than colouring the badge. A template image has
-            // no colour to spend on it anyway.
+            // own mark rather than changing the indicator. A template image
+            // has no colour to spend on it anyway.
             if signal.isDegraded {
                 Image(systemName: "exclamationmark.triangle.fill")
-                    .font(.system(size: 9, weight: .bold))
+                    .font(.system(size: 11, weight: .bold))
                     .padding(.leading, 1)
             }
         }
@@ -53,104 +62,89 @@ struct MenuBarLabel: View {
     }
 }
 
-/// The AgentHQ robot's head, with an optional state badge.
-struct MenuBarMark: View {
-    /// The state to badge with, or nil to draw the mark on its own.
-    var badge: AgentState?
-
-    /// The mark's drawn box. The head is square, and denser than the full
-    /// robot it replaced, so 15pt reads as the same weight the old 15pt did.
-    private static let mark: CGFloat = 15
-    private static let badgeSize: CGFloat = 8.5
-
-    /// The transparent gap punched through the mark around the badge.
+enum MenuBarMetrics {
+    /// The mark's drawn box.
     ///
-    /// Without it the badge is unreadable. A template image is alpha only, so
-    /// the badge and the mark are the same ink: a filled circle touching the
-    /// head does not sit *on* it, it fuses with it into one blob. The ring is
-    /// what makes the badge a separate object, and it is the reason this is
-    /// hand-composited rather than a plain `.overlay`.
-    private static let ring: CGFloat = 1.25
-
-    /// The badge's outer radius — the glyph plus the gap around it. This, not
-    /// the glyph, is what decides how much room the badge needs.
-    private static let badgeRadius = badgeSize / 2 + ring
-
-    /// Where the badge sits, in the mark's own coordinates: nested into the
-    /// head's rounded top-right corner.
+    /// Measured against its neighbours in the bar, not picked: a 16pt glyph
+    /// like the input menu's fills its box, but a fifth of this one is antenna,
+    /// so at 16pt — and at the 15pt it used to be — the head read a size
+    /// smaller than everything beside it. 17pt puts the head at their weight.
+    static let mark: CGFloat = 17
+    /// The capsule's height: the head's, less a hair, so the two read as one
+    /// row of equal weight. The head is 55/73 of the mark, 12.8pt.
     ///
-    /// The mark this replaced was a spindly full-body robot with an empty
-    /// corner to drop a badge into. A head is a solid square, so there is no
-    /// empty corner and the ring has to bite *something*. Sitting it on the
-    /// diagonal means the bite lands on the corner's curve, which is already
-    /// cut away — placed any further in it sliced a notch out of the flat top
-    /// edge instead, and a square with a notch reads as a rendering bug.
-    private static let badgeCenter = CGPoint(x: 16.25, y: 3.75)
+    /// It also has to fit. The capsule is centred on the head, which sits
+    /// low in the mark's box, and anything that reaches below the box grows
+    /// the image downward — and the bar centres the image, so the robot would
+    /// ride up to make room. At 11pt the capsule ends just above the box's
+    /// bottom edge, and the image stays the mark's height.
+    static let pill: CGFloat = 12.5
 
-    /// How far the badge reaches above the mark, and how far past its right
-    /// edge. Zero with no badge, so a resting bar draws a tight 15pt square.
-    private var topPad: CGFloat {
-        badge == nil ? 0 : max(0, Self.badgeRadius - Self.badgeCenter.y)
+    /// A bare count matches the other counts in the bar — Linear's sits at
+    /// about this size. One inside the capsule runs a point smaller, because
+    /// the capsule cannot grow past the head to make room for it.
+    static let count: CGFloat = 13
+    static let pillCount: CGFloat = 12
+}
+
+extension VerticalAlignment {
+    /// The centre of the robot's head, not of its box.
+    ///
+    /// The box includes the antenna, so its centre is the top of the face and
+    /// anything centred on it rides visibly high. Everything else in the label
+    /// centres on the head instead.
+    private enum RobotFace: AlignmentID {
+        static func defaultValue(in d: ViewDimensions) -> CGFloat {
+            d[VerticalAlignment.center]
+        }
     }
 
-    private var rightPad: CGFloat {
-        badge == nil ? 0 : max(0, Self.badgeCenter.x + Self.badgeRadius - Self.mark)
-    }
+    static let robotFace = VerticalAlignment(RobotFace.self)
+}
 
-    /// The canvas is padded *above and below* by the badge's overhang, even
-    /// though the badge only reaches above.
-    ///
-    /// The status button centres whatever image it is handed, so the mark is
-    /// centred in the bar only if it is centred in the image. Padding one side
-    /// to make room for the badge and not the other hangs the mark low by half
-    /// the overhang — 2.25pt here, which is invisible against an empty bar and
-    /// unmistakable next to a neighbour that is centred properly.
-    ///
-    /// Horizontally there is no such constraint: the mark and the count are
-    /// centred together as one row, so the badge's reach to the right costs
-    /// nothing and is not mirrored on the left.
-    private var canvasSize: CGSize {
-        CGSize(width: Self.mark + rightPad, height: Self.mark + topPad * 2)
-    }
+/// The most urgent state and how many agents are in it.
+///
+/// Two silhouettes. A state that wants the user — anything in Needs you, and
+/// a finished run — is a solid capsule with its glyph and count knocked out
+/// of it. Working is the same glyph and count, bare. Both are static; three
+/// dots are the one shape that says "in progress" standing still, which is
+/// all invariant 12 allows in the bar.
+struct StateIndicator: View {
+    let state: AgentState
+    let count: Int
 
-    /// The badge's centre in canvas coordinates.
-    private var badgeOrigin: CGPoint {
-        CGPoint(x: Self.badgeCenter.x, y: Self.badgeCenter.y + topPad)
-    }
+    /// Everything but working. Idle never gets here — see `isResting`.
+    var isFilled: Bool { state != .working }
 
     var body: some View {
-        let canvas = canvasSize
-        return ZStack(alignment: .topLeading) {
-            // The mark, with the ring erased out of it where the badge lands.
-            ZStack(alignment: .topLeading) {
-                RobotHead()
-                    .frame(width: Self.mark, height: Self.mark)
-                    .offset(y: topPad)
-
-                if badge != nil {
-                    Circle()
-                        .frame(width: Self.badgeRadius * 2, height: Self.badgeRadius * 2)
-                        .position(badgeOrigin)
-                        .blendMode(.destinationOut)
-                }
+        if isFilled {
+            ZStack {
+                Capsule()
+                content.blendMode(.destinationOut)
             }
-            .frame(width: canvas.width, height: canvas.height, alignment: .topLeading)
+            .fixedSize()
             // `destinationOut` erases whatever it is composited against, so
-            // without this group it would punch a hole in the menu bar itself
-            // rather than in the mark.
+            // without this group it would punch through to the menu bar
+            // itself rather than out of the capsule.
             .compositingGroup()
-
-            if let badge {
-                Image(systemName: Brand.symbol(for: badge))
-                    // Bold, not semibold: `arrow.triangle.branch` is the one
-                    // badge with no filled body, and at semibold its strokes
-                    // thinned to nothing inside the ring.
-                    .font(.system(size: Self.badgeSize, weight: .bold))
-                    .frame(width: Self.badgeSize, height: Self.badgeSize)
-                    .position(badgeOrigin)
-            }
+        } else {
+            content
         }
-        .frame(width: canvas.width, height: canvas.height)
+    }
+
+    private var content: some View {
+        HStack(spacing: 2.5) {
+            Image(systemName: Brand.barGlyph(for: state))
+                .font(.system(size: isFilled ? 9.5 : 11, weight: .heavy))
+            Text("\(count)")
+                .font(.system(
+                    size: isFilled ? MenuBarMetrics.pillCount : MenuBarMetrics.count,
+                    weight: isFilled ? .bold : .semibold
+                ))
+                .monospacedDigit()
+        }
+        .padding(.horizontal, isFilled ? 5.5 : 0)
+        .frame(height: MenuBarMetrics.pill)
     }
 }
 
@@ -221,8 +215,10 @@ struct RobotEyes: Shape {
 /// takes the space above it, so the eyes sit at y=45.5, well below the middle
 /// of the box. Anything sampling "the centre row" of this mark finds the
 /// bridge of the face, not the eyes.
-private struct MarkGeometry {
+struct MarkGeometry {
     static let unit: CGFloat = 73
+    /// The head runs y=18…73: its centre, as a fraction of the box.
+    static let headCentre: CGFloat = (18 + 73) / 2 / unit
 
     let origin: CGPoint
     let scale: CGFloat

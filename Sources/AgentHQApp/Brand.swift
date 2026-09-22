@@ -38,6 +38,11 @@ enum Brand {
         }
     }
 
+    /// Text on a solid state pill. White on the light-mode state colours,
+    /// near-black on the dark-mode ones: those are lifted for legibility as
+    /// text on a dark panel, which makes them too light to carry white.
+    static let onStateText = pair(light: 0xFFFFFF, dark: 0x111315)
+
     /// Machine-level trouble. Never borrows an agent colour — a dropped tunnel
     /// is not a dead agent.
     static let machineDown = pair(light: 0xC2410C, dark: 0xFFA726)
@@ -49,8 +54,8 @@ enum Brand {
     /// A machine is a second axis, so these are deliberately not the state
     /// palette: a chip that shared a hue with a state pill would read as
     /// status, which is the Separate Axis Rule. Fixed rather than adaptive
-    /// because the chip carries white text in both appearances, and each tone
-    /// is dark enough for white to hold AA.
+    /// because they are only ever used as a wash under primary text, which
+    /// reads the same over any of them.
     static let machinePalette: [Color] = [
         Color(nsColor: NSColor(hex: 0x1D4ED8)), // blue
         Color(nsColor: NSColor(hex: 0x6D28D9)), // violet
@@ -96,6 +101,25 @@ enum Brand {
     }
 
     static let accent = pair(light: 0x8A5A00, dark: 0xFFC94D)
+
+    /// Label colours for the row's three standing actions, so each reads by
+    /// colour before its word: End red, Continue/Nudge green, Reveal orange.
+    ///
+    /// Their own tokens rather than borrowed state or machine colours. End in
+    /// Machine Down orange said "tunnel trouble"; Reveal in it would say the
+    /// same. Each pair holds AA as text on the popover in its appearance,
+    /// which system `.green` and `.orange` do not in light mode.
+    static let endAction = pair(light: 0xB91C1C, dark: 0xF87171)
+    static let continueAction = pair(light: 0x15803D, dark: 0x4ADE80)
+    static let revealAction = pair(light: 0xC2410C, dark: 0xFB923C)
+
+    /// Fills for a prominent glass button. Fixed rather than adaptive, like the
+    /// machine chips: the label on them is white in both appearances, and the
+    /// dark-mode state colours are light enough that white text on them fails
+    /// AA. Approve Fill navy lifted a step so it still reads as a button on a
+    /// dark popover, and the light-mode Alarm red.
+    static let prominentFill = Color(nsColor: NSColor(hex: 0x1E4BD2))
+    static let destructiveFill = Color(nsColor: NSColor(hex: 0xB3261E))
     static let secondaryText = pair(light: 0x5A5F64, dark: 0xB3B8BD)
 
     // MARK: Labels
@@ -115,13 +139,6 @@ enum Brand {
         }
     }
 
-    /// One glyph per state, shared by the panel row and the menu bar badge.
-    ///
-    /// The badge is drawn at 9pt with no label beside it, so each of these has
-    /// to survive as a silhouette: the eye gets the outline, not the interior.
-    /// That rules out the detailed symbols that read fine in the panel —
-    /// `xmark.diamond.fill` and `circle.fill` both collapsed into "a blob" at
-    /// badge size, which is the whole reason this list changed.
     /// What the button that sends `agent.prompt` should call itself.
     ///
     /// One herdr call, two different acts. On a working agent it interrupts a
@@ -138,6 +155,7 @@ enum Brand {
         state == .working ? "Tell it what to do" : "Say what happens next"
     }
 
+    /// One glyph per state, for the panel row.
     static func symbol(for state: AgentState) -> String {
         switch state {
         // An X, not an exclamation: the badge has to separate "this agent
@@ -165,15 +183,47 @@ enum Brand {
         }
     }
 
+    /// The glyph in the menu bar's state indicator.
+    ///
+    /// Bare marks, not the enclosed ones above: in the bar the glyph is either
+    /// knocked out of a filled capsule, where an enclosed symbol becomes a
+    /// hole with a mark floating in it, or set beside a number, where the
+    /// enclosure is just a second dot. The shape family matches the panel's
+    /// so a reader moving between the two sees one vocabulary.
+    static func barGlyph(for state: AgentState) -> String {
+        switch state {
+        case .crashed:       return "xmark"
+        case .needsApproval: return "hand.raised.fill"
+        case .needsInput:    return "exclamationmark"
+        case .mergeConflict: return "arrow.triangle.branch"
+        case .ciFailed:      return "xmark"
+        case .rateLimited:   return "pause.fill"
+        case .finished:      return "checkmark"
+        case .working:       return "ellipsis"
+        case .idle:          return "moon.zzz.fill"
+        case .unknown:       return "circle.dashed"
+        }
+    }
+
     // MARK: Type
 
     static let title = Font.system(size: 15, weight: .bold)
     static let agentName = Font.system(size: 13.5, weight: .semibold)
     static let body = Font.system(size: 12.5, weight: .medium)
     static let sectionLabel = Font.system(size: 10.5, weight: .semibold)
+    static let sectionHeader = Font.system(size: 11.5, weight: .semibold)
     /// Anything measured, and the machine name — an address is read character
     /// by character.
     static let mono = Font.system(size: 10.5, weight: .medium, design: .monospaced)
+
+    // MARK: Shape
+
+    /// Row corners. Concentric with the popover's own corner at the 14pt
+    /// gutter, which is what makes a row look set into the glass rather than
+    /// laid on top of it.
+    static let rowRadius: CGFloat = 12
+    /// For anything nested one level inside a row.
+    static let insetRadius: CGFloat = 8
 
     // MARK: Helpers
 

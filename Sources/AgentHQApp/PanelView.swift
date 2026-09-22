@@ -78,6 +78,7 @@ struct PanelView: View {
                     // need you". Measured content, floored so a collapse can never
                     // hide the list again, capped so a long herd scrolls.
                     .frame(height: min(max(listHeight, Self.minimumListHeight), Self.maximumListHeight))
+                    .softScrollEdges()
                     .onPreferenceChange(ListHeightKey.self) { listHeight = $0 }
                     // A click on a notification names an agent; land the panel
                     // on it. `onAppear` covers the first show (the focus was set
@@ -88,7 +89,9 @@ struct PanelView: View {
                 }
             }
 
-            Divider()
+            // Inset, as a Tahoe menu's separators are: a full-bleed rule cuts
+            // the glass in two instead of dividing what sits on it.
+            Divider().padding(.horizontal, 14)
             footer
         }
         .frame(width: 460)
@@ -138,17 +141,16 @@ struct PanelView: View {
     /// Machine-level state lives here, apart from the agents, because an
     /// unreachable machine is a different problem from a stuck agent.
     private var footer: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            ForEach(fleet.snapshot.machines) { view in
-                MachineRow(view: view, fleet: fleet)
-            }
+        VStack(alignment: .leading, spacing: 8) {
+            MachineStrip(machines: fleet.snapshot.machines, fleet: fleet)
 
-            HStack(spacing: 8) {
+            HStack(spacing: 12) {
                 Toggle("Notify", isOn: Binding(
                     get: { notifier.isEnabled },
                     set: { notifier.isEnabled = $0 }
                 ))
-                .toggleStyle(.checkbox)
+                .toggleStyle(.switch)
+                .controlSize(.mini)
                 .font(Brand.body)
                 .help("Notify when an agent needs you, or a machine stops answering")
 
@@ -163,20 +165,122 @@ struct PanelView: View {
                             fleet.announcesCompletions = $0
                         }
                     ))
-                    .toggleStyle(.checkbox)
+                    .toggleStyle(.switch)
+                    .controlSize(.mini)
                     .font(Brand.body)
                     .help("Also notify when a run finishes, with what it said")
                 }
                 Spacer()
-                Button("Quit") { NSApplication.shared.terminate(nil) }
-                    .font(Brand.body)
-                    .keyboardShortcut("q")
+                ActionButton(title: "Quit", tint: Brand.secondaryText) {
+                    NSApplication.shared.terminate(nil)
+                }
+                .keyboardShortcut("q")
             }
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
     }
 
+}
+
+/// The machines, folded to one line until asked for.
+///
+/// Three machines as three always-open rows took more of the panel than the
+/// agents did, and the agents are what the panel is for. Folding them must not
+/// hide trouble, though (invariant 2 cuts both ways: a down machine is not a
+/// dead agent, and it is not nothing either), so the folded line carries a dot
+/// per machine in its own reachability colour and names any machine that is
+/// not simply connected.
+private struct MachineStrip: View {
+    let machines: [MachineView]
+    let fleet: FleetStore
+
+    /// Folded by default, and remembered: someone who keeps it open wants it
+    /// open next launch too.
+    @AppStorage("machineStripExpanded") private var isExpanded = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Button {
+                withAnimation(.easeOut(duration: 0.15)) { isExpanded.toggle() }
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 8, weight: .bold))
+                        .rotationEffect(.degrees(isExpanded ? 90 : 0))
+                        .foregroundStyle(Brand.secondaryText)
+                        .frame(width: 8)
+                    HStack(spacing: 3) {
+                        ForEach(machines) { view in
+                            Circle()
+                                .fill(view.dotColor)
+                                .frame(width: 6, height: 6)
+                                .help(view.machine.displayName)
+                        }
+                    }
+                    Text(machines.count == 1 ? "1 machine" : "\(machines.count) machines")
+                        .font(Brand.sectionLabel)
+                        .foregroundStyle(Brand.secondaryText)
+                    if let trouble {
+                        Text(trouble.text)
+                            .font(Brand.sectionLabel)
+                            .foregroundStyle(trouble.isDown ? Brand.machineDown : Brand.secondaryText)
+                            .lineLimit(1)
+                    }
+                    Spacer(minLength: 0)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help(isExpanded ? "Hide machines" : "Show machines")
+
+            if isExpanded {
+                ForEach(machines) { view in
+                    MachineRow(view: view, fleet: fleet)
+                }
+                .padding(.leading, 14)
+            }
+        }
+    }
+
+    /// The machines that are not simply connected, by name — "build-box
+    /// unreachable", not "1 unreachable", so the folded line is enough to know
+    /// which box to look at. The verbatim reason stays in the unfolded row.
+    private var trouble: (text: String, isDown: Bool)? {
+        let notConnected = machines.filter { !$0.reachability.isConnected }
+        guard !notConnected.isEmpty else { return nil }
+        let text = notConnected
+            .map { "\($0.machine.displayName) \($0.shortStatus)" }
+            .joined(separator: " · ")
+        return ("— " + text, notConnected.contains { $0.isDown })
+    }
+}
+
+private extension MachineView {
+    /// A failure the user is being asked to look at. `reconnecting` is not
+    /// one — see ``MachineReachability/isTransient``.
+    var isDown: Bool {
+        if case .unreachable = reachability { return true }
+        return false
+    }
+
+    var dotColor: Color {
+        if reachability.isConnected { return Brand.color(for: .working) }
+        if isDown { return Brand.machineDown }
+        return Brand.secondaryText
+    }
+
+    /// The one-word form for the folded line. Never the failure's reason,
+    /// which is a sentence and belongs in the row that has room for it.
+    var shortStatus: String {
+        switch reachability {
+        case .connected:    return "connected"
+        case .connecting:   return "connecting"
+        case .disabled:     return "disabled"
+        case .reconnecting: return "reconnecting"
+        case .unreachable:  return "unreachable"
+        }
+    }
 }
 
 /// One machine: whether it is answering, what it is running, and the two
@@ -228,12 +332,7 @@ private struct MachineRow: View {
         }
     }
 
-    /// A failure the user is being asked to look at. `reconnecting` is not
-    /// one — see ``MachineReachability/isTransient``.
-    private var isDown: Bool {
-        if case .unreachable = view.reachability { return true }
-        return false
-    }
+    private var isDown: Bool { view.isDown }
 
     /// Offered for a reconnect too, not just a failure. The supervisor now
     /// backs off to half a minute between attempts, and the comment above
@@ -247,11 +346,7 @@ private struct MachineRow: View {
         }
     }
 
-    private var dotColor: Color {
-        if view.reachability.isConnected { return Brand.color(for: .working) }
-        if isDown { return Brand.machineDown }
-        return Brand.secondaryText
-    }
+    private var dotColor: Color { view.dotColor }
 
     /// Verbatim for a failure. "Unreachable" alone tells the user nothing they
     /// can act on; the reason names the host and what it refused.
@@ -275,11 +370,17 @@ private struct GroupSection: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text(title.uppercased())
-                .font(Brand.sectionLabel)
-                .tracking(0.5)
-                .foregroundStyle(Brand.secondaryText)
-                .padding(.horizontal, 14)
+            // Sentence case with a count, as macOS 26 menus head their
+            // sections; the all-caps tracked label was the pre-glass idiom.
+            HStack(spacing: 5) {
+                Text(title)
+                    .font(Brand.sectionHeader)
+                    .foregroundStyle(Brand.secondaryText)
+                Text("\(agents.count)")
+                    .font(Brand.mono)
+                    .foregroundStyle(Brand.secondaryText)
+            }
+            .padding(.horizontal, 18)
 
             ForEach(agents) { agent in
                 AgentRow(
@@ -348,15 +449,16 @@ private struct AgentRow: View {
                 }
 
                 HStack(spacing: 6) {
+                    // Solid: the state is what the row is for, so it is the
+                    // one filled chip on it. See `MachineTag` for the other
+                    // half of that bargain.
                     Text(Brand.label(for: agent.state).uppercased())
                         .font(Brand.sectionLabel)
                         .tracking(0.4)
-                        .foregroundStyle(Brand.color(for: agent.state))
+                        .foregroundStyle(Brand.onStateText)
                         .padding(.horizontal, 7)
                         .padding(.vertical, 2.5)
-                        .background(
-                            Capsule().fill(Brand.color(for: agent.state).opacity(0.14))
-                        )
+                        .background(Capsule().fill(Brand.color(for: agent.state)))
                     // The machine is on every row, in mono: in a fleet, which
                     // box this is on is part of the agent's identity. The chip
                     // gives each machine its own colour so the eye can sort a
@@ -400,8 +502,8 @@ private struct AgentRow: View {
         .padding(.vertical, 8)
         .padding(.horizontal, 10)
         .background(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(Color.primary.opacity(0.025))
+            RoundedRectangle(cornerRadius: Brand.rowRadius, style: .continuous)
+                .fill(Color.primary.opacity(0.035))
         )
     }
 
@@ -470,7 +572,7 @@ private struct AgentRow: View {
                         // panel of several rows is still a panel.
                         .frame(maxHeight: 220)
                         .background(
-                            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                            RoundedRectangle(cornerRadius: Brand.insetRadius, style: .continuous)
                                 .fill(Color.primary.opacity(0.05))
                         )
                         // A read is a snapshot, not a feed: herdr has no
@@ -517,9 +619,9 @@ private struct AgentRow: View {
         let available = agent.actions
 
         if available != .none || failure != nil {
-            HStack(spacing: 6) {
+            GlassCluster {
                 if let key = available.approveKey {
-                    ActionButton(title: "Approve (\(key))", tint: Brand.color(for: .working)) {
+                    ActionButton(title: "Approve (\(key))", tint: Brand.color(for: .working), emphasis: .prominent) {
                         run(.approve)
                     }
                 }
@@ -534,7 +636,7 @@ private struct AgentRow: View {
                     // cannot get back, and the panel is a list of
                     // near-identical rows with the buttons in the same place
                     // on each — so the confirmation names the row.
-                    ActionButton(title: "End", tint: Brand.machineDown) {
+                    ActionButton(title: "End", tint: Brand.endAction) {
                         pendingEnd.toggle()
                     }
                 }
@@ -544,7 +646,7 @@ private struct AgentRow: View {
                     ActionButton(title: "Reply", tint: Brand.accent) { open(.reply) }
                 }
                 if available.canNudge {
-                    ActionButton(title: Brand.promptAction(for: agent.state), tint: Brand.secondaryText) {
+                    ActionButton(title: Brand.promptAction(for: agent.state), tint: Brand.continueAction) {
                         open(.nudge)
                     }
                 }
@@ -552,7 +654,11 @@ private struct AgentRow: View {
                     // The row's one dependable action. Approve is missing on
                     // most prompts because most name no key, so without this
                     // a blocked row can offer nothing but Decline.
-                    ActionButton(title: revealTitle, tint: Brand.secondaryText) { reveal() }
+                    // No machine name in the title: the chip on the row
+                    // already says which box, and "Reveal on wsl" made the
+                    // same button a different width on every row.
+                    ActionButton(title: "Reveal", tint: Brand.revealAction) { reveal() }
+                        .help("Show this pane in Ghostty on \(machineName)")
                 }
                 Spacer(minLength: 0)
                 if isSending {
@@ -567,11 +673,11 @@ private struct AgentRow: View {
             .disabled(isSending)
 
             if pendingEnd {
-                HStack(spacing: 6) {
+                GlassCluster {
                     Text("End \(agent.provider) in \(agent.project) on \(machineName)?")
                         .font(Brand.sectionLabel)
                         .foregroundStyle(Brand.secondaryText)
-                    ActionButton(title: "End it", tint: Brand.machineDown) {
+                    ActionButton(title: "End it", tint: Brand.machineDown, emphasis: .destructive) {
                         pendingEnd = false
                         run(.end, note: "Asked \(agent.provider) to exit.")
                     }
@@ -591,11 +697,11 @@ private struct AgentRow: View {
                     // Named, because the risk is not a typo — it is this text
                     // going to the wrong row. The panel is a list of similar
                     // rows and the buttons sit in the same place on each.
-                    HStack(spacing: 6) {
+                    GlassCluster {
                         Text("\(kind.verb) \(agent.provider) in \(agent.project) on \(machineName)?")
                             .font(Brand.sectionLabel)
                             .foregroundStyle(Brand.secondaryText)
-                        ActionButton(title: "Confirm", tint: Brand.accent) {
+                        ActionButton(title: "Confirm", tint: Brand.accent, emphasis: .prominent) {
                             pendingCompose = nil
                             composing = nil
                             compose = ""
@@ -618,7 +724,7 @@ private struct AgentRow: View {
                             .textFieldStyle(.roundedBorder)
                             .font(Brand.body)
                             .onSubmit { stageCompose() }
-                        ActionButton(title: "Send", tint: Brand.accent) { stageCompose() }
+                        ActionButton(title: "Send", tint: Brand.accent, emphasis: .prominent) { stageCompose() }
                     }
                     .padding(.top, 2)
                 }
@@ -659,12 +765,6 @@ private struct AgentRow: View {
 
     private var machineName: String {
         machine?.displayName ?? String(agent.ref.machine.raw.prefix(8))
-    }
-
-    private var isRemote: Bool { machine?.transport.isRemote ?? false }
-
-    private var revealTitle: String {
-        isRemote ? "Reveal on \(machineName)" : "Reveal"
     }
 
     private func reveal() {
@@ -750,30 +850,14 @@ private enum ComposeKind: Equatable {
     }
 }
 
-private struct ActionButton: View {
-    let title: String
-    let tint: Color
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            Text(title)
-                .font(Brand.sectionLabel)
-                .foregroundStyle(tint)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 3)
-                .background(Capsule().fill(tint.opacity(0.14)))
-        }
-        .buttonStyle(.plain)
-    }
-}
-
-/// A machine's identity as a filled chip.
+/// A machine's identity as a tinted chip.
 ///
-/// Deliberately solid where the state pill is a 14% wash: the two sit on the
-/// same row, and the fill is what keeps machine identity from reading as
-/// status. The colour is stable per machine, so the same box is the same chip
-/// every launch.
+/// A wash, where the state pill is solid. The two sit on the same row and the
+/// difference in weight is what keeps "which box" from reading as "what
+/// state". It used to be the other way round, and a saturated chip per row
+/// out-shouted the state it sat beside — the machine is context, the state is
+/// the news. The colour is stable per machine, so the same box is the same
+/// chip every launch.
 private struct MachineTag: View {
     let name: String
     let id: MachineID
@@ -781,11 +865,14 @@ private struct MachineTag: View {
     var body: some View {
         Text(name)
             .font(Brand.mono)
-            .foregroundStyle(.white)
+            // Primary text, not the machine colour: the palette is dark by
+            // design, and dark text on a dark popover fails AA.
+            .foregroundStyle(.primary)
             .lineLimit(1)
             .padding(.horizontal, 6)
             .padding(.vertical, 1.5)
-            .background(Capsule().fill(Brand.machineColor(for: id)))
+            .background(Capsule().fill(Brand.machineColor(for: id).opacity(0.2)))
+            .overlay(Capsule().strokeBorder(Brand.machineColor(for: id).opacity(0.45), lineWidth: 0.5))
             .help(name)
     }
 }

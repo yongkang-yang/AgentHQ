@@ -97,6 +97,14 @@ struct StateSymbolTests {
             "\(state) names \(name), which SF Symbols does not have"
         )
     }
+    @Test("each state's bar glyph resolves to a real SF Symbol", arguments: AgentState.allCases)
+    func barGlyphResolves(state: AgentState) {
+        let name = Brand.barGlyph(for: state)
+        #expect(
+            NSImage(systemSymbolName: name, accessibilityDescription: nil) != nil,
+            "\(state) names \(name), which SF Symbols does not have"
+        )
+    }
 }
 
 @Suite("The button that sends words says what it does")
