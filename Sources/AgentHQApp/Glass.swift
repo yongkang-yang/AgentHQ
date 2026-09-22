@@ -3,10 +3,10 @@ import SwiftUI
 /// Liquid Glass, where the system has it, and the flat tonal look everywhere
 /// else.
 ///
-/// Glass is for the control layer only. The popover is already glass on
-/// macOS 26, and the agent rows are content sitting on it, so they stay tonal
-/// fills: glass on content — or glass on glass — is what the HIG asks you not
-/// to do, and a row of glass cards reads as a row of buttons. What floats is
+/// Glass is for the control layer only. The panel is the system's popover
+/// material — see `PanelWindowController` — and the agent rows are content
+/// sitting on it, so they stay tonal fills: glass on content is what the HIG
+/// asks you not to do, and a row of glass cards reads as a row of buttons. What floats is
 /// what the user presses.
 ///
 /// The package still targets macOS 14, so every glass call is behind an

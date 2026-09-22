@@ -107,7 +107,7 @@ enum Brand {
     ///
     /// Their own tokens rather than borrowed state or machine colours. End in
     /// Machine Down orange said "tunnel trouble"; Reveal in it would say the
-    /// same. Each pair holds AA as text on the popover in its appearance,
+    /// same. Each pair holds AA as text on the panel in its appearance,
     /// which system `.green` and `.orange` do not in light mode.
     static let endAction = pair(light: 0xB91C1C, dark: 0xF87171)
     static let continueAction = pair(light: 0x15803D, dark: 0x4ADE80)
@@ -117,7 +117,7 @@ enum Brand {
     /// machine chips: the label on them is white in both appearances, and the
     /// dark-mode state colours are light enough that white text on them fails
     /// AA. Approve Fill navy lifted a step so it still reads as a button on a
-    /// dark popover, and the light-mode Alarm red.
+    /// dark panel, and the light-mode Alarm red.
     static let prominentFill = Color(nsColor: NSColor(hex: 0x1E4BD2))
     static let destructiveFill = Color(nsColor: NSColor(hex: 0xB3261E))
     static let secondaryText = pair(light: 0x5A5F64, dark: 0xB3B8BD)
@@ -218,10 +218,11 @@ enum Brand {
 
     // MARK: Shape
 
-    /// Row corners. Concentric with the popover's own corner at the 14pt
-    /// gutter, which is what makes a row look set into the glass rather than
-    /// laid on top of it.
-    static let rowRadius: CGFloat = 12
+    /// Row corners. Concentric with the panel's 28pt corner at the 14pt
+    /// gutter — 28 less 14 — which is what makes a row look set into the glass
+    /// rather than laid on top of it. Change one and the other goes with it;
+    /// see `PanelWindowController.cornerRadius`.
+    static let rowRadius: CGFloat = 14
     /// For anything nested one level inside a row.
     static let insetRadius: CGFloat = 8
 

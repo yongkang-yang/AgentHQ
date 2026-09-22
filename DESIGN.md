@@ -203,8 +203,16 @@ ambient furniture.
 
 ## Components
 
-- **Agent row** — 12pt continuous corner (concentric with the popover at the
-  14pt gutter), 3.5% primary fill (6% hover), 1pt
+- **Panel** — a borderless window under the status item, 28pt continuous
+  corner, no arrow, as Tahoe's own menu-bar panels. Not an `NSPopover`, whose
+  corner cannot be changed. The surface is the system popover material (about
+  237 over a white page), not Liquid Glass: glass rendered pure white there
+  and the panel lost its edge. No shadow — the window server's traced one
+  squared off the bottom corners, and a drawn one read as haze — so the edge
+  is the material's tone plus a 0.5pt hairline at 14% black (18% white in
+  dark mode). Liquid Glass is on the controls only.
+- **Agent row** — 14pt continuous corner (concentric with the panel's 28pt at
+  the 14pt gutter), 3.5% primary fill (6% hover), 1pt
   accent-tinted hairline. Left status rail, 3.5pt capsule in the state color.
   Stale rows (machine not connected) drop to 50% opacity and lose their
   actions — visible, clearly not current, not clickable.
@@ -238,10 +246,9 @@ ambient furniture.
 
 ## Liquid Glass
 
-Glass is the control layer, never the content. The popover is glass on
-macOS 26, so rows, pills and chips stay tonal fills on it — glass on glass
-reads as noise, and a glass card reads as a button. Only what the user presses
-floats. Separators are inset; the list's scroll edges soften under a `.soft`
+Glass is the control layer, never the content. The panel is the system
+popover material, and rows, pills and chips stay tonal fills on it — a glass
+card reads as a button. Only what the user presses floats. Separators are inset; the list's scroll edges soften under a `.soft`
 scroll-edge effect instead of a hard rule. Toggles are mini switches.
 
 ## Do's and don'ts

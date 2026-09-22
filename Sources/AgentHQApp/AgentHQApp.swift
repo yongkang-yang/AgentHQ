@@ -9,8 +9,9 @@ import SwiftUI
 /// `MenuBarExtra` draws a nicer label for free, but it offers no way to open
 /// itself, and opening the panel on a notification click is the whole point:
 /// a blocked agent's notification is only useful if taking it lands on the
-/// message and the reply box. An `NSStatusItem` + `NSPopover` pair can be
-/// shown from anywhere.
+/// message and the reply box. An `NSStatusItem` and a panel of our own can
+/// be shown from anywhere — see `PanelWindowController` for why it is not an
+/// `NSPopover`.
 @main
 @MainActor
 final class AgentHQApp: NSObject, NSApplicationDelegate {
@@ -27,7 +28,7 @@ final class AgentHQApp: NSObject, NSApplicationDelegate {
     private let notifier = Notifier()
     private let focus = PanelFocus()
     private var statusItem: NSStatusItem!
-    private var popover: NSPopover!
+    private var panel: PanelWindowController!
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         installMainMenu()
@@ -39,12 +40,9 @@ final class AgentHQApp: NSObject, NSApplicationDelegate {
         fleet.onAnnouncements = { [notifier] batch in notifier.deliver(batch) }
         fleet.announcesCompletions = notifier.announcesCompletions
 
-        let popover = NSPopover()
-        popover.behavior = .transient
-        popover.contentViewController = NSHostingController(
+        panel = PanelWindowController(
             rootView: PanelView(fleet: fleet, notifier: notifier, focus: focus)
         )
-        self.popover = popover
 
         let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         statusItem.button?.target = self
@@ -57,13 +55,12 @@ final class AgentHQApp: NSObject, NSApplicationDelegate {
     }
 
     @objc private func togglePanel() {
-        popover.isShown ? popover.performClose(nil) : showPanel()
+        panel.isShown ? panel.close() : showPanel()
     }
 
     private func showPanel() {
-        guard let button = statusItem.button, !popover.isShown else { return }
-        NSApp.activate(ignoringOtherApps: true)
-        popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+        guard let button = statusItem.button else { return }
+        panel.show(below: button)
     }
 
     // MARK: - Status item
@@ -76,7 +73,7 @@ final class AgentHQApp: NSObject, NSApplicationDelegate {
         // the bar tints it from its alpha alone. This replaces reading the
         // button's appearance and picking a colour to match: that guess was
         // right for light and dark and wrong for the third case, the
-        // highlighted item, which inverts under the popover. A template gets
+        // highlighted item, which inverts while the panel is open. A template gets
         // all three for free, and Reduce Transparency and an accent-tinted
         // bar besides.
         image?.isTemplate = true

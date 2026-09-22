@@ -866,7 +866,7 @@ private struct MachineTag: View {
         Text(name)
             .font(Brand.mono)
             // Primary text, not the machine colour: the palette is dark by
-            // design, and dark text on a dark popover fails AA.
+            // design, and dark text on a dark panel fails AA.
             .foregroundStyle(.primary)
             .lineLimit(1)
             .padding(.horizontal, 6)
