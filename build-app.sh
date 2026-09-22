@@ -40,6 +40,7 @@ cat > "$APP_DIR/Contents/Info.plist" <<PLIST
     <!-- Menu bar only: no Dock icon, no app switcher entry. -->
     <key>LSUIElement</key><true/>
     <key>NSHumanReadableCopyright</key><string>GPL-3.0</string>
+    <key>NSAppleEventsUsageDescription</key><string>Reveal brings the selected herdr conversation to the front in Ghostty.</string>
 </dict>
 </plist>
 PLIST
@@ -50,10 +51,11 @@ echo "==> Signing"
 IDENTITY="$(security find-identity -v -p codesigning 2>/dev/null \
     | grep "Developer ID Application" | head -1 | sed -E 's/.*"(.+)"/\1/' || true)"
 if [ -n "$IDENTITY" ]; then
-    codesign --force --options runtime --timestamp --sign "$IDENTITY" "$APP_DIR"
+    codesign --force --options runtime --timestamp \
+        --entitlements Resources/AgentHQ.entitlements --sign "$IDENTITY" "$APP_DIR"
     echo "    signed with: $IDENTITY"
 else
-    codesign --force --sign - "$APP_DIR"
+    codesign --force --entitlements Resources/AgentHQ.entitlements --sign - "$APP_DIR"
     echo "    ad-hoc signed (no Developer ID found)"
 fi
 

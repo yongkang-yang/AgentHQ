@@ -6,7 +6,10 @@ import Foundation
 public struct Announcement: Sendable, Equatable {
     public enum Subject: Sendable, Equatable {
         /// An agent entered a state that wants a human.
-        case agent(ref: AgentRef, provider: String, state: AgentState, reason: String?)
+        case agent(
+            ref: AgentRef, provider: String, state: AgentState,
+            reason: String?, message: String?
+        )
         /// A machine stopped answering. Not an agent problem, and never
         /// reported as one.
         case machineUnreachable(machine: MachineID, reason: String)
@@ -50,11 +53,16 @@ public struct AnnouncementBatch: Sendable, Equatable {
     }
 
     /// The body, which carries the detail the title had to drop.
+    ///
+    /// A single announcement shows the message it interrupted for: the actual
+    /// question is what lets the user answer from the notification, and a
+    /// restated state is not. The one-line reason is the fallback for when
+    /// there was no prompt to read.
     public var body: String {
         if announcements.count == 1 {
             switch announcements[0].subject {
-            case .agent(_, _, _, let reason):
-                return reason ?? ""
+            case .agent(_, _, _, let reason, let message):
+                return message ?? reason ?? ""
             case .machineUnreachable(_, let reason):
                 return reason
             }
@@ -64,7 +72,7 @@ public struct AnnouncementBatch: Sendable, Equatable {
 
     private static func line(for announcement: Announcement) -> String {
         switch announcement.subject {
-        case .agent(_, let provider, let state, _):
+        case .agent(_, let provider, let state, _, _):
             return "\(provider) on \(announcement.machineName) — \(state.rawValue)"
         case .machineUnreachable:
             return "\(announcement.machineName) is unreachable"
@@ -141,7 +149,8 @@ public struct NotificationPolicy: Sendable {
                         ref: agent.ref,
                         provider: agent.provider,
                         state: agent.state,
-                        reason: agent.reason
+                        reason: agent.reason,
+                        message: agent.message
                     ),
                     machineName: machineNames[agent.ref.machine] ?? agent.ref.machine.raw
                 ))

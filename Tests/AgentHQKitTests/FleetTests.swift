@@ -59,8 +59,9 @@ struct AgentStateTests {
     @Test("unknown never lands in Needs you")
     func unknownStaysSecondary() {
         // Promoting unclassified state into the alarm section trains the user
-        // to ignore the alarm section.
-        #expect(AgentState.unknown.group == .working)
+        // to ignore the alarm section. Which section it does land in is a
+        // layout decision; that it is not this one is the claim.
+        #expect(AgentState.unknown.group != .needsYou)
         #expect(!AgentState.unknown.needsAttention)
     }
 }
@@ -117,6 +118,44 @@ struct FleetSnapshotTests {
         #expect(snapshot.signal.workingCount == 1)
     }
 
+    @Test("the menu bar gets one block per live conversation, most urgent first")
+    func menuBarBlocks() {
+        let snapshot = FleetSnapshot(machines: [
+            machineView(m1, name: "laptop", .connected, [
+                agent(m1, "p1", .working),
+                agent(m1, "p2", .needsApproval),
+                agent(m1, "p3", .idle),
+            ]),
+            // A dropped tunnel's agents are stale, not conversations the user
+            // can act on, so they get no block.
+            machineView(m2, name: "server", .unreachable(reason: "ssh exited"), [
+                agent(m2, "p1", .crashed),
+            ]),
+        ])
+
+        #expect(snapshot.signal.menuBarAgents.map(\.ref.agent.raw) == ["p2", "p1", "p3"])
+        #expect(snapshot.signal.menuBarAgents.map(\.state) == [.needsApproval, .working, .idle])
+    }
+
+    @Test("the menu bar counts each state, most urgent first")
+    func menuBarStateCounts() {
+        let snapshot = FleetSnapshot(machines: [
+            machineView(m1, name: "laptop", .connected, [
+                agent(m1, "p1", .working),
+                agent(m1, "p2", .working),
+                agent(m1, "p3", .needsInput),
+                agent(m1, "p4", .finished),
+                agent(m1, "p5", .idle),
+            ]),
+        ])
+
+        let counts = snapshot.signal.stateCounts
+        // needs-input before finished before working before idle, and a state
+        // with no agents is absent rather than a zero.
+        #expect(counts.map(\.state) == [.needsInput, .finished, .working, .idle])
+        #expect(counts.map(\.count) == [1, 1, 2, 1])
+    }
+
     @Test("an unreachable machine does not turn its agents into alarms")
     func staleAgentsAreExcluded() {
         // The whole point of keeping reachability on its own axis: one dropped
@@ -147,5 +186,41 @@ struct FleetSnapshotTests {
     @Test("an empty fleet has no opinion")
     func emptyFleet() {
         #expect(FleetSnapshot.empty.signal == .empty)
+    }
+}
+
+@Suite("Panel sections describe the rows they contain")
+struct SectionGroupingTests {
+    private func agent(_ id: String, _ state: AgentState) -> Agent {
+        Agent(
+            ref: AgentRef(machine: MachineID("m"), agent: AgentID(id)),
+            provider: "pi", state: state, stateEnteredAt: Date()
+        )
+    }
+
+    /// The Working section used to carry idle rows, so a heading reading
+    /// WORKING sat directly above a pill reading IDLE.
+    @Test("an idle agent never appears under the Working heading")
+    func idleIsNotUnderWorking() {
+        let snapshot = FleetSnapshot(machines: [MachineView(
+            machine: Machine(
+                id: MachineID("m"), displayName: "m",
+                transport: .local(socketPath: "/tmp/x.sock")
+            ),
+            reachability: .connected,
+            agents: [agent("w:p1", .working), agent("w:p2", .idle), agent("w:p3", .finished)]
+        )])
+
+        let working = snapshot.agents(in: .working)
+        #expect(working.map(\.state) == [.working])
+        #expect(snapshot.agents(in: .idle).map(\.state) == [.idle])
+        #expect(snapshot.agents(in: .completed).map(\.state) == [.finished])
+    }
+
+    /// Every state has to land somewhere, or a row simply vanishes from the
+    /// panel while still being counted in the menu bar.
+    @Test("every state belongs to exactly one section", arguments: AgentState.allCases)
+    func everyStateIsPlaced(state: AgentState) {
+        #expect(AttentionGroup.allCases.filter { state.group == $0 }.count == 1)
     }
 }

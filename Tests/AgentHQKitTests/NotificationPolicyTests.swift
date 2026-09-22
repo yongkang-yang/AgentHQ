@@ -172,7 +172,8 @@ struct AnnouncementBatchTests {
             Announcement(
                 subject: .agent(
                     ref: AgentRef(machine: remote, agent: AgentID("p\(i)")),
-                    provider: "cursor", state: .needsApproval, reason: "Approval: run (once) (y)"
+                    provider: "cursor", state: .needsApproval, reason: "Approval: run (once) (y)",
+                    message: nil
                 ),
                 machineName: machine
             )
@@ -206,5 +207,24 @@ struct AnnouncementBatchTests {
     func empty() {
         #expect(AnnouncementBatch.none.isEmpty)
         #expect(AnnouncementBatch.none.title.isEmpty)
+    }
+
+    @Test("a single notification shows the question, not a restated state")
+    func singleShowsTheMessage() {
+        // The question is what lets the user answer from the notification; a
+        // restated state is not. The one-line reason is the fallback.
+        let announcement = Announcement(
+            subject: .agent(
+                ref: AgentRef(machine: remote, agent: AgentID("p1")),
+                provider: "cursor", state: .needsInput,
+                reason: "Which database?",
+                message: "Which database should I migrate first?\n  (enter to send \u{00B7} esc to cancel)"
+            ),
+            machineName: "wsl"
+        )
+        #expect(
+            AnnouncementBatch([announcement]).body
+                == "Which database should I migrate first?\n  (enter to send \u{00B7} esc to cancel)"
+        )
     }
 }

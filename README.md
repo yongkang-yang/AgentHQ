@@ -79,6 +79,10 @@ Two invariants worth knowing before reading the code:
 - [herdr](https://herdr.dev) on every machine you want to watch
   (verified against herdr 0.9.0, wire protocol 22)
 - OpenSSH 6.7+ for remote machines (unix-socket forwarding)
+- Ghostty 1.3+ for Reveal to bring a conversation to the front. On this Mac it
+  focuses the Ghostty surface already running herdr; for a remote machine it
+  opens or reuses a Ghostty window attached to that machine. macOS will ask for
+  permission to let AgentHQ control Ghostty on the first use.
 
 ## Build
 

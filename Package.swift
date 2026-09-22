@@ -36,5 +36,6 @@ let package = Package(
         .testTarget(name: "AgentHQHerdrTests", dependencies: ["AgentHQHerdr"]),
         .testTarget(name: "AgentHQTransportTests", dependencies: ["AgentHQTransport"]),
         .testTarget(name: "AgentHQFleetTests", dependencies: ["AgentHQFleet"]),
+        .testTarget(name: "AgentHQAppTests", dependencies: ["AgentHQApp"]),
     ]
 )

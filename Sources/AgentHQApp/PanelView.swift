@@ -1,5 +1,6 @@
 import AgentHQFleet
 import AgentHQKit
+import Combine
 import SwiftUI
 
 /// The triage desk. Three sections, most urgent first.
@@ -9,6 +10,9 @@ import SwiftUI
 struct PanelView: View {
     let fleet: FleetStore
     let notifier: Notifier
+    /// Set by a notification click: which agent the panel should bring into
+    /// view once it opens.
+    let focus: PanelFocus
     @State private var now = Date()
     /// What the agent list measured itself to be. See the frame below.
     @State private var listHeight: CGFloat = 0
@@ -40,40 +44,48 @@ struct PanelView: View {
                     .padding(.vertical, 18)
                     .frame(maxWidth: .infinity, alignment: .center)
             } else {
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 14) {
-                        ForEach(AttentionGroup.allCases, id: \.rawValue) { group in
-                            let agents = fleet.snapshot.agents(in: group, now: now)
-                            if !agents.isEmpty {
-                                GroupSection(
-                                    title: group.title,
-                                    agents: agents,
-                                    machines: machines,
-                                    now: now,
-                                    fleet: fleet
-                                )
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 14) {
+                            ForEach(AttentionGroup.allCases, id: \.rawValue) { group in
+                                let agents = fleet.snapshot.agents(in: group, now: now)
+                                if !agents.isEmpty {
+                                    GroupSection(
+                                        title: group.title,
+                                        agents: agents,
+                                        machines: machines,
+                                        now: now,
+                                        fleet: fleet
+                                    )
+                                }
                             }
                         }
+                        .padding(.vertical, 12)
+                        // Measure what the list actually wants to be.
+                        .background(
+                            GeometryReader { proxy in
+                                Color.clear.preference(
+                                    key: ListHeightKey.self, value: proxy.size.height
+                                )
+                            }
+                        )
                     }
-                    .padding(.vertical, 12)
-                    // Measure what the list actually wants to be.
-                    .background(
-                        GeometryReader { proxy in
-                            Color.clear.preference(
-                                key: ListHeightKey.self, value: proxy.size.height
-                            )
-                        }
-                    )
+                    // An explicit height, not `maxHeight`. A ScrollView inside a
+                    // menu-bar popover has no height to inherit and no
+                    // intrinsic one of its own, so `maxHeight` alone collapsed it
+                    // to zero: the panel rendered its header and its footer and
+                    // nothing between them, while the header cheerfully said "1
+                    // need you". Measured content, floored so a collapse can never
+                    // hide the list again, capped so a long herd scrolls.
+                    .frame(height: min(max(listHeight, Self.minimumListHeight), Self.maximumListHeight))
+                    .onPreferenceChange(ListHeightKey.self) { listHeight = $0 }
+                    // A click on a notification names an agent; land the panel
+                    // on it. `onAppear` covers the first show (the focus was set
+                    // before the popover existed) and `onChange` a later click
+                    // while it is already open.
+                    .onAppear { scrollToFocus(proxy) }
+                    .onChange(of: focus.nonce) { _, _ in scrollToFocus(proxy) }
                 }
-                // An explicit height, not `maxHeight`. A ScrollView inside a
-                // MenuBarExtra window has no height to inherit and no
-                // intrinsic one of its own, so `maxHeight` alone collapsed it
-                // to zero: the panel rendered its header and its footer and
-                // nothing between them, while the header cheerfully said "1
-                // need you". Measured content, floored so a collapse can never
-                // hide the list again, capped so a long herd scrolls.
-                .frame(height: min(max(listHeight, Self.minimumListHeight), Self.maximumListHeight))
-                .onPreferenceChange(ListHeightKey.self) { listHeight = $0 }
             }
 
             Divider()
@@ -81,6 +93,15 @@ struct PanelView: View {
         }
         .frame(width: 460)
         .onReceive(tick) { now = $0 }
+    }
+
+    /// Bring the agent a notification named into view. A no-op when the panel
+    /// was opened by the status item, or when that agent has since gone.
+    private func scrollToFocus(_ proxy: ScrollViewProxy) {
+        guard let ref = focus.ref else { return }
+        withAnimation(.easeOut(duration: 0.2)) {
+            proxy.scrollTo(ref, anchor: .center)
+        }
     }
 
     private var header: some View {
@@ -153,8 +174,7 @@ private struct MachineRow: View {
             Circle()
                 .fill(dotColor)
                 .frame(width: 6, height: 6)
-            Text(view.machine.displayName).font(Brand.mono)
-
+            MachineTag(name: view.machine.displayName, id: view.machine.id)
             Text(statusText)
                 .font(Brand.sectionLabel)
                 .foregroundStyle(isDown ? Brand.machineDown : Brand.secondaryText)
@@ -239,6 +259,7 @@ private struct GroupSection: View {
                     fleet: fleet
                 )
                     .padding(.horizontal, 14)
+                    .id(agent.ref)
             }
         }
     }
@@ -275,7 +296,7 @@ private struct AgentRow: View {
                         .font(.system(size: 10))
                         .foregroundStyle(Brand.color(for: agent.state))
                     Text(agent.provider).font(Brand.agentName)
-                    Text(agent.workspace)
+                    Text(agent.project)
                         .font(Brand.body)
                         .foregroundStyle(Brand.secondaryText)
                         .lineLimit(1)
@@ -296,13 +317,33 @@ private struct AgentRow: View {
                             Capsule().fill(Brand.color(for: agent.state).opacity(0.14))
                         )
                     // The machine is on every row, in mono: in a fleet, which
-                    // box this is on is part of the agent's identity.
-                    Text(machineName)
-                        .font(Brand.mono)
-                        .foregroundStyle(Brand.secondaryText)
+                    // box this is on is part of the agent's identity. The chip
+                    // gives each machine its own colour so the eye can sort a
+                    // mixed list by box without reading a word.
+                    MachineTag(name: machineName, id: agent.ref.machine)
+                    // The model is the one thing that separates two same
+                    // provider rows on one machine. Shown only when a reporter
+                    // named it; herdr has no model field to fall back on.
+                    if !agent.model.isEmpty {
+                        Text(agent.model)
+                            .font(Brand.mono)
+                            .foregroundStyle(Brand.secondaryText)
+                            .lineLimit(1)
+                    }
                 }
 
-                if let reason = agent.reason {
+                // The prompt itself, when there is one. It is what the row is
+                // asking the user to act on: a highlighted-row menu's choices
+                // and the key that takes one live over several lines, and a
+                // one-line summary cannot carry them.
+                if let message = agent.message {
+                    Text(message)
+                        .font(Brand.mono)
+                        .foregroundStyle(Brand.secondaryText)
+                        .lineLimit(6)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .textSelection(.enabled)
+                } else if let reason = agent.reason {
                     Text(reason)
                         .font(Brand.body)
                         .foregroundStyle(Brand.secondaryText)
@@ -372,7 +413,7 @@ private struct AgentRow: View {
                 Spacer(minLength: 0)
                 if isSending {
                     // A static word, not a spinner: continuous animation inside
-                    // `MenuBarExtra` makes the panel flicker open and closed.
+                    // the menu-bar panel makes it flicker open and closed.
                     Text("sending…")
                         .font(Brand.sectionLabel)
                         .foregroundStyle(Brand.secondaryText)
@@ -387,7 +428,7 @@ private struct AgentRow: View {
                     // going to the wrong row. The panel is a list of similar
                     // rows and the buttons sit in the same place on each.
                     HStack(spacing: 6) {
-                        Text("\(kind.verb) \(agent.provider) on \(machineName)?")
+                        Text("\(kind.verb) \(agent.provider) in \(agent.project) on \(machineName)?")
                             .font(Brand.sectionLabel)
                             .foregroundStyle(Brand.secondaryText)
                         ActionButton(title: "Confirm", tint: Brand.accent) {
@@ -458,18 +499,7 @@ private struct AgentRow: View {
 
     private var isRemote: Bool { machine?.transport.isRemote ?? false }
 
-    /// How the user gets to a remote machine's herdr from here. herdr attaches
-    /// over SSH itself, so this is its command, not a raw ssh line.
-    private var attachCommand: String? {
-        guard case .ssh(let destination, _, let session, _) = machine?.transport else { return nil }
-        return session == "default" || session.isEmpty
-            ? "herdr --remote \(destination)"
-            : "herdr --remote \(destination) --session \(session)"
-    }
-
     private var revealTitle: String {
-        // Says where, because on a remote machine focusing a pane changes
-        // something the user is not currently looking at.
         isRemote ? "Reveal on \(machineName)" : "Reveal"
     }
 
@@ -479,19 +509,15 @@ private struct AgentRow: View {
         Task {
             do {
                 try await fleet.perform(.reveal, on: agent.ref)
-                if let command = attachCommand {
-                    // Focusing a pane on another machine is real but invisible
-                    // from here, so hand over the command that gets the user
-                    // there. Saying so is the point; a silent copy is a button
-                    // that appears to do nothing.
-                    NSPasteboard.general.clearContents()
-                    NSPasteboard.general.setString(command, forType: .string)
-                    revealNote = "Focused it there. Copied: \(command)"
+                if let machine {
+                    revealNote = try GhosttyReveal.present(machine: machine, agent: agent)
                 } else {
-                    revealNote = "Focused it in herdr."
+                    failure = "Machine unavailable."
                 }
             } catch let error as InterventionError {
                 failure = error.summary
+            } catch let error as GhosttyReveal.RevealError {
+                failure = error.localizedDescription
             } catch {
                 failure = String(describing: error)
             }
@@ -575,5 +601,27 @@ private struct ActionButton: View {
                 .background(Capsule().fill(tint.opacity(0.14)))
         }
         .buttonStyle(.plain)
+    }
+}
+
+/// A machine's identity as a filled chip.
+///
+/// Deliberately solid where the state pill is a 14% wash: the two sit on the
+/// same row, and the fill is what keeps machine identity from reading as
+/// status. The colour is stable per machine, so the same box is the same chip
+/// every launch.
+private struct MachineTag: View {
+    let name: String
+    let id: MachineID
+
+    var body: some View {
+        Text(name)
+            .font(Brand.mono)
+            .foregroundStyle(.white)
+            .lineLimit(1)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 1.5)
+            .background(Capsule().fill(Brand.machineColor(for: id)))
+            .help(name)
     }
 }

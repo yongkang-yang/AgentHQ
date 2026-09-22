@@ -8,10 +8,14 @@ public struct Classification: Sendable, Equatable {
     /// Nil when the state came from herdr's status alone and there is nothing
     /// honest to add.
     public let reason: String?
+    /// The lines a row can show when the reason is too short to act on. Nil
+    /// when there is nothing worth showing.
+    public let message: String?
 
-    public init(state: AgentState, reason: String? = nil) {
+    public init(state: AgentState, reason: String? = nil, message: String? = nil) {
         self.state = state
         self.reason = reason
+        self.message = message
     }
 }
 
@@ -88,6 +92,25 @@ public struct StateClassifier: Sendable {
     ///    the status-derived state, because "finished" is misleading when the
     ///    run finished by failing.
     public func classify(status: String, recentOutput: String?) -> Classification {
+        let result = coreClassify(status: status, recentOutput: recentOutput)
+        // Only the states that want a human carry a message: storing one on
+        // every working agent would be transcript for nobody to read.
+        guard Self.messageStates.contains(result.state),
+              let output = recentOutput, !output.isEmpty
+        else { return result }
+        return Classification(
+            state: result.state,
+            reason: result.reason,
+            message: Self.excerpt(Self.tail(of: output))
+        )
+    }
+
+    /// The states whose row can carry more than its one-line reason.
+    static let messageStates: Set<AgentState> = [
+        .needsApproval, .needsInput, .mergeConflict, .ciFailed, .rateLimited,
+    ]
+
+    private func coreClassify(status: String, recentOutput: String?) -> Classification {
         let base = Self.baseState(for: status)
         guard let output = recentOutput, !output.isEmpty else {
             return Classification(state: base)
@@ -260,6 +283,26 @@ public struct StateClassifier: Sendable {
         return last == "?" || last == "？"
     }
 
+    /// How many lines of a prompt a row shows.
+    ///
+    /// A highlighted-row menu is a handful of lines and a footer, so six is
+    /// enough to see the choices and the key that takes one. It is a cap, not a
+    /// summary: every line is verbatim.
+    static let excerptLines = 6
+
+    /// The tail a row can actually show.
+    ///
+    /// Drops the prompt furniture that carries no letters or digits — box
+    /// borders, separators, a lone cursor — so six lines are six lines of
+    /// substance. Nil when nothing survives.
+    static func excerpt(_ lines: [String]) -> String? {
+        let meaningful = lines
+            .map(condense)
+            .filter { $0.count > 3 && $0.contains(where: { $0.isLetter || $0.isNumber }) }
+        guard !meaningful.isEmpty else { return nil }
+        return meaningful.suffix(excerptLines).joined(separator: "\n")
+    }
+
     static func condense(_ line: String) -> String {
         let collapsed = line
             .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
@@ -288,11 +331,27 @@ public extension HerdrSnapshot {
     /// Panes without a detected agent are dropped: herdr tracks every pane,
     /// including plain shells, and a triage panel that lists shells is a
     /// process list — exactly what this product is not.
+    ///
+    /// **The status comes from the agent view, not the pane.** herdr has two
+    /// status enums and they are not the same set: `AgentStatus`, on
+    /// `agent.get` / `agent.list`, is `idle | working | blocked | done |
+    /// unknown`, while `PaneAgentState`, on a pane record, drops `done`. So a
+    /// finished run read off a pane arrives as `idle` — not as an error, not
+    /// as a missing field, but as a different valid state. Classified from the
+    /// pane alone, `.finished` was unreachable on every machine: an agent went
+    /// working, then idle, and the Completed section stayed empty forever.
+    ///
+    /// This is invariant 7 again in a form that field names do not reveal.
+    /// The field is spelled `agent_status` in both places and decodes fine in
+    /// both; only the value set differs.
+    /// - Parameter agentViews: what `agent.get` / `agent.list` said about each
+    ///   pane, keyed by pane id. **The status is read from here in preference
+    ///   to the pane's own**, and a pane with no entry falls back to its own.
     func agents(
         on machine: MachineID,
         classifier: StateClassifier = StateClassifier(),
         output: [String: String] = [:],
-        stateSeqs: [String: UInt64] = [:],
+        agentViews: [String: HerdrAgentInfo] = [:],
         now: Date = Date()
     ) -> [Agent] {
         let affordances = PromptAffordances()
@@ -301,25 +360,28 @@ public extension HerdrSnapshot {
             guard let provider = pane.agent, !provider.isEmpty else { return nil }
 
             let recent = output[pane.paneId]
+            let view = agentViews[pane.paneId]
             let classification = classifier.classify(
-                status: pane.agentStatus,
+                status: view?.agentStatus ?? pane.agentStatus,
                 recentOutput: recent
             )
 
             return Agent(
                 ref: AgentRef(machine: machine, agent: AgentID(pane.paneId)),
                 provider: provider.lowercased(),
+                model: pane.model ?? "",
                 workspace: workspaceNames[pane.workspaceId] ?? pane.workspaceId,
                 directory: pane.cwd ?? "",
                 state: classification.state,
                 reason: classification.reason,
+                message: classification.message,
                 stateEnteredAt: now,
                 lastActivityAt: nil,
                 // Derived from the same output the state came from, so the
                 // buttons on a row and the pill on it can never disagree about
                 // which prompt they are describing.
                 actions: affordances.actions(for: classification.state, recentOutput: recent),
-                stateSeq: stateSeqs[pane.paneId]
+                stateSeq: view?.stateChangeSeq
             )
         }
     }

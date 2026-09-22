@@ -34,8 +34,11 @@ struct StateClassifierTests {
     }
 
     @Test("an idle agent is secondary, never presented as completed work")
-    func idleGroupsWithWorking() {
-        #expect(AgentState.idle.group == .working)
+    func idleIsNeverCompleted() {
+        // Completed would claim a run finished. Idle is an agent sitting at
+        // its prompt, which may never have run anything at all.
+        #expect(AgentState.idle.group == .idle)
+        #expect(AgentState.idle.group != .completed)
         #expect(!AgentState.idle.needsAttention)
         // Alive but doing nothing is the least interesting thing on the panel.
         #expect(AgentState.idle.severity < AgentState.working.severity)
@@ -112,6 +115,30 @@ struct StateClassifierTests {
     func fallsBackToLastLine() {
         let pane = "Waiting for you.\n\n  type a name and press enter"
         #expect(classify("blocked", pane).reason == "type a name and press enter")
+    }
+
+    @Test("the message carries the whole prompt, not just its last line")
+    func messageCarriesThePrompt() throws {
+        // A highlighted-row menu's choices and its footer are what the user
+        // answers with; the one-line reason cannot hold them.
+        let pane = """
+        Pick a base branch to rebase onto:
+
+          1. main
+          2. release/v2
+        \u{276F} 3. develop
+
+          \u{2191}/\u{2193} to move \u{00B7} enter to confirm \u{00B7} esc to cancel
+        """
+        let message = try #require(classify("blocked", pane).message)
+        #expect(message.contains("1. main"))
+        #expect(message.contains("2. release/v2"))
+        #expect(message.contains("enter to confirm"))
+    }
+
+    @Test("a working agent has no message to show")
+    func workingHasNoMessage() {
+        #expect(classify("working", "Compiling 12 files\nBuilding\u{2026}").message == nil)
     }
 
     // MARK: Conflicts and failures

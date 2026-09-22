@@ -15,6 +15,7 @@ public final class FleetStore {
     public private(set) var snapshot: FleetSnapshot = .empty
 
     private var sessions: [MachineID: MachineSession] = [:]
+    private var sessionsRevision: UInt64 = 0
     private var refreshTask: Task<Void, Never>?
     private var hasStarted = false
     private var notificationPolicy = NotificationPolicy()
@@ -102,6 +103,7 @@ public final class FleetStore {
     public func add(_ machine: Machine) {
         let session = MachineSession(machine: machine)
         sessions[machine.id] = session
+        sessionsRevision &+= 1
         let records = restorableDwell
         Task { [weak self] in
             await session.prime(dwell: records)
@@ -121,6 +123,7 @@ public final class FleetStore {
         machine.isEnabled = isEnabled
 
         sessions[id] = MachineSession(machine: machine)
+        sessionsRevision &+= 1
         Task { [weak self, session] in
             await session.stop()
             await self?.sessions[id]?.start()
@@ -140,6 +143,7 @@ public final class FleetStore {
 
     public func remove(_ id: MachineID) {
         guard let session = sessions.removeValue(forKey: id) else { return }
+        sessionsRevision &+= 1
         Task { [weak self] in
             await session.stop()
             await self?.refresh()
@@ -164,10 +168,14 @@ public final class FleetStore {
     /// Assembled as one value and assigned once, so a view never renders a
     /// fleet that is half old and half new.
     public func refresh() async {
+        let revision = sessionsRevision
         var views: [MachineView] = []
         for session in sessions.values {
             views.append(await session.view())
         }
+        // An older refresh may finish after a machine was removed or replaced.
+        // Its views must not restore that machine to the snapshot.
+        guard revision == sessionsRevision else { return }
         views.sort { $0.machine.displayName < $1.machine.displayName }
         snapshot = FleetSnapshot(machines: views)
 

@@ -138,9 +138,13 @@ tinted fill pulls the background toward the text color. If a shade cannot hold
 the floor, darken the light variant and brighten the dark one — never ship a
 grey.
 
-**The Fixed Badge Rule.** The menu-bar badge uses fixed `NSColor.system*`
-colors, never adaptive ones: adaptive colors resolve against the panel's
-appearance, not the bar's.
+**The Fixed Badge Rule.** The menu-bar label is the app icon plus a single
+state glyph and its count. One indicator, chosen by severity — needs-input
+before finished before working before idle — never one indicator per state:
+the bar has room for one number, and a blocked agent must not be hidden behind
+the working ones. State is carried by the glyph's shape and the number, not by
+colour, so the bar stays legible on light, dark, and wallpaper-tinted bars
+alike.
 
 **The Separate Axis Rule.** Machine trouble never borrows an agent color.
 A machine going dark is rendered in Machine Down Orange at the machine level,
@@ -203,8 +207,12 @@ ambient furniture.
   actions — visible, clearly not current, not clickable.
 - **State pill** — capsule, uppercased 10.5pt semibold, 14% status fill, 0.5pt
   hairline at 28%, strengthened text variant.
-- **Machine chip** — monospaced 10.5pt, secondary text, no fill. Quiet: it is
-  context, not status.
+- **Machine chip** — monospaced 10.5pt, white on a solid per-machine colour.
+  Machines are an identity axis, so the fill is a stable colour derived from
+  the machine id, not the state palette and not a status signal. It is the one
+  filled chip on a row: the state pill stays a 14% wash, which is what keeps
+  "which box" from reading as "what state". Machine trouble still overrides
+  nothing here — it is the status strip and dot that turn Machine Down Orange.
 - **Machine status strip** — only present when a machine is in trouble. Names
   the machine and the reason verbatim ("build-box unreachable — ssh exited").
 - **Buttons** — 7pt radius. Approve uses Approve Fill navy with a white label;
@@ -225,8 +233,8 @@ ambient furniture.
 
 - Don't ship system `.green`, `.orange`, `.secondary`, or `.tertiary` for text
   — they fail AA in light mode.
-- Don't add continuous animation inside `MenuBarExtra`. It is a known cause of
-  the panel flickering open and closed.
+- Don't add continuous animation inside the menu-bar panel. It is a known
+  cause of the panel flickering open and closed.
 - Don't group the panel by machine. Group by attention.
 - Don't render a stale agent as a current one, and never as a crashed one.
 - Don't invent new greys. One secondary-text token, one vocabulary.

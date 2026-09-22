@@ -42,6 +42,59 @@ enum Brand {
     /// is not a dead agent.
     static let machineDown = pair(light: 0xC2410C, dark: 0xFFA726)
 
+    // MARK: Machines
+
+    /// Identity colours for machines, one chip per box.
+    ///
+    /// A machine is a second axis, so these are deliberately not the state
+    /// palette: a chip that shared a hue with a state pill would read as
+    /// status, which is the Separate Axis Rule. Fixed rather than adaptive
+    /// because the chip carries white text in both appearances, and each tone
+    /// is dark enough for white to hold AA.
+    static let machinePalette: [Color] = [
+        Color(nsColor: NSColor(hex: 0x1D4ED8)), // blue
+        Color(nsColor: NSColor(hex: 0x6D28D9)), // violet
+        Color(nsColor: NSColor(hex: 0x0F766E)), // teal
+        Color(nsColor: NSColor(hex: 0xB45309)), // amber
+        Color(nsColor: NSColor(hex: 0xA21CAF)), // fuchsia
+        Color(nsColor: NSColor(hex: 0x0E7490)), // cyan
+        Color(nsColor: NSColor(hex: 0x475569)), // slate
+        Color(nsColor: NSColor(hex: 0xBE123C)), // rose
+        Color(nsColor: NSColor(hex: 0x15803D)), // green
+        Color(nsColor: NSColor(hex: 0x78350F)), // brown
+    ]
+
+    static func machineColor(for id: MachineID) -> Color {
+        machinePalette[machineColorIndex(for: id)]
+    }
+
+    /// Stable across launches: `hashValue` is seeded per process, so an id
+    /// hashed with it would wear a different chip every time the app restarts.
+    static func machineColorIndex(for id: MachineID) -> Int {
+        stableIndex(id.raw, modulo: machinePalette.count)
+    }
+
+    // MARK: Menu bar
+
+    /// FNV-1a with the splitmix64 finalizer.
+    ///
+    /// FNV alone clusters in its low bits for short, similar strings — three
+    /// real machine ids all landed on the same chip — and the finalizer spreads
+    /// them before the modulo.
+    static func stableIndex(_ value: String, modulo: Int) -> Int {
+        var hash: UInt64 = 0xcbf2_9ce4_8422_2325
+        for byte in value.utf8 {
+            hash ^= UInt64(byte)
+            hash = hash &* 0x0000_0100_0000_01b3
+        }
+        hash ^= hash >> 33
+        hash = hash &* 0xff51_afd7_ed55_8ccd
+        hash ^= hash >> 33
+        hash = hash &* 0xc4ce_b9fe_1a85_ec53
+        hash ^= hash >> 33
+        return Int(hash % UInt64(modulo))
+    }
+
     static let accent = pair(light: 0x8A5A00, dark: 0xFFC94D)
     static let secondaryText = pair(light: 0x5A5F64, dark: 0xB3B8BD)
 
@@ -62,17 +115,36 @@ enum Brand {
         }
     }
 
+    /// One glyph per state, shared by the panel row and the menu bar badge.
+    ///
+    /// The badge is drawn at 9pt with no label beside it, so each of these has
+    /// to survive as a silhouette: the eye gets the outline, not the interior.
+    /// That rules out the detailed symbols that read fine in the panel —
+    /// `xmark.diamond.fill` and `circle.fill` both collapsed into "a blob" at
+    /// badge size, which is the whole reason this list changed.
     static func symbol(for state: AgentState) -> String {
         switch state {
-        case .crashed:       return "exclamationmark.octagon.fill"
+        // An X, not an exclamation: the badge has to separate "this agent
+        // died" from "this agent wants you", and at 9pt the only difference
+        // the eye reliably gets is mark shape, not container shape.
+        case .crashed:       return "xmark.octagon.fill"
         case .needsApproval: return "hand.raised.fill"
-        case .needsInput:    return "questionmark.circle.fill"
+        // An exclamation, not a question: the bar is reporting that something
+        // wants the user, and a question mark reads as the app being unsure.
+        case .needsInput:    return "exclamationmark.circle.fill"
         case .mergeConflict: return "arrow.triangle.branch"
-        case .ciFailed:      return "xmark.diamond.fill"
-        case .rateLimited:   return "hourglass"
+        // Paired with .finished's checkmark on purpose — the same circle, the
+        // opposite mark, so "passed" and "failed" are one glance apart.
+        case .ciFailed:      return "xmark.circle.fill"
+        // Not an hourglass: its waist is a sub-pixel at badge size and it
+        // rendered as a smudge. A pause bar survives, and "the provider
+        // paused you" is the honest reading of a rate limit anyway.
+        case .rateLimited:   return "pause.circle.fill"
         case .finished:      return "checkmark.circle.fill"
-        case .working:       return "circle.fill"
-        case .idle:          return "pause.circle"
+        // Three dots is the one shape that says "in progress" while standing
+        // perfectly still, which invariant 11 requires of anything in the bar.
+        case .working:       return "ellipsis.circle.fill"
+        case .idle:          return "moon.zzz.fill"
         case .unknown:       return "circle.dashed"
         }
     }

@@ -73,13 +73,48 @@ design discussion, not a refactor.
    So `Agent.stateSeq` is optional and the guard **fails closed**: a row with
    no stamp refuses to send rather than sending unguarded.
 
-9. **Answering a prompt goes through `pane.send_keys`, never `agent.prompt`.**
+9. **A pane record cannot say `done`. The agent view can.** herdr has two
+   status enums, both spelled `agent_status`, both decoding cleanly:
+
+   - `AgentStatus`, on `agent.get` / `agent.list`:
+     `idle | working | blocked | done | unknown`
+   - `PaneAgentState`, on a pane record — `session.snapshot`'s panes and every
+     `pane_updated` event — drops `done`.
+
+   So a finished run read off a pane arrives as `idle`. Not an error, not a
+   missing field: a different valid value. Classified from panes alone,
+   `.finished` was unreachable on every machine — agents went working, then
+   idle, and the Completed section stayed empty forever. `agents(on:)` takes
+   the status from `agentViews` and falls back to the pane only when a pane has
+   no entry. Verified against herdr 0.9.1 and its own JSON schema.
+
+   **And `done` does not mean "completed" — it means "completed and unseen."**
+   herdr's own docs: *"`idle` and `done` both mean the agent is ready for
+   input. The CLI/API uses the server's seen state to distinguish them;
+   explicit focus commands mark the target seen, while reads do not. Each TUI
+   client tracks viewed completions independently, so its Done badge can
+   differ from the CLI or another client's badge."*
+
+   Three consequences, each of which reads as a bug until you know this:
+
+   - Reveal clears a row out of Completed. It calls `pane.focus`, which marks
+     the agent seen, and `perform` resyncs straight after. That is correct.
+   - Looking at a pane in herdr's own TUI does **not** clear it here. That
+     client tracks its own viewed completions and never tells the server.
+   - herdr's TUI showing a Done badge while `agent.list` says `idle` is not a
+     disagreement to reconcile. They are two bookkeepers, and AgentHQ is an
+     API client, so the server's is the only one it can read.
+
+   `pane.read` does not mark an agent seen, which is what makes it safe to
+   call on every stopped pane.
+
+10. **Answering a prompt goes through `pane.send_keys`, never `agent.prompt`.**
    `agent.prompt` takes `target`, not `pane_id` — a `pane_id` is rejected with
    `missing field \`target\`` — and it refuses a blocked agent outright with
    `agent_blocked: requires interactive input`. Which is the whole case
    answering a prompt exists for.
 
-10. **Never infer an answer key from which agent is running.** A provider-keyed
+11. **Never infer an answer key from which agent is running.** A provider-keyed
     table ("claude answers with enter") is wrong across versions and wrong
     across the several prompt shapes one agent uses. `PromptAffordances` reads
     the key out of the prompt's own footer, and offers nothing where the prompt
@@ -87,7 +122,7 @@ design discussion, not a refactor.
     "enter to confirm", and enter there takes whichever row is highlighted —
     which herdr reports nothing about. An Approve button there would be
     pressing enter and hoping.
-11. **No continuous animation inside `MenuBarExtra`.** It causes the panel to
+12. **No continuous animation inside `MenuBarExtra`.** It causes the panel to
     flicker open and closed. Emphasis is static.
 
 ## Style

@@ -96,12 +96,21 @@ public enum AttentionGroup: Int, Sendable, Equatable, CaseIterable, Codable {
     case needsYou = 0
     case working = 1
     case completed = 2
+    /// Alive, nothing to act on.
+    ///
+    /// Idle used to be filed under Working, on the reasoning that it is
+    /// "visible but secondary, and not Completed, which would claim work was
+    /// done". Both halves of that are right and the conclusion still put a row
+    /// reading IDLE under a heading reading WORKING, which claims something
+    /// the row itself denies two lines below.
+    case idle = 3
 
     public var title: String {
         switch self {
         case .needsYou:  return "Needs you"
         case .working:   return "Working"
         case .completed: return "Completed"
+        case .idle:      return "Idle"
         }
     }
 }
@@ -117,14 +126,15 @@ public extension AgentState {
         case .working:
             return .working
         case .idle:
-            // Alive, not doing anything, nothing to act on. Visible but
-            // secondary — not Completed, which would claim work was done.
-            return .working
+            return .idle
         case .unknown:
-            // Secondary but visible. Not `needsYou`: promoting every state we
-            // failed to classify into the alarm section trains the user to
-            // ignore that section, which is the one thing it cannot survive.
-            return .working
+            // Rides along with idle, and is separated from it by the row's own
+            // pill — the same split `Brand.color` already makes, where both
+            // share one grey for "nothing to act on" and the label carries the
+            // difference. Not `needsYou`: promoting every state we failed to
+            // classify into the alarm section trains the user to ignore that
+            // section, which is the one thing it cannot survive.
+            return .idle
         }
     }
 }

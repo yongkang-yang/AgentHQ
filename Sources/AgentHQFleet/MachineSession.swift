@@ -38,6 +38,10 @@ public actor MachineSession {
     private var restorableDwell: [DwellRecord] = []
     private var hasRestoredDwell = false
 
+    /// Whether the agent list has been rebuilt since the event subscription
+    /// last came up. See ``apply(_:)``'s `.connected` case.
+    private var hasSyncedSinceConnect = false
+
     public init(
         machine: Machine,
         makeClient: @escaping ClientFactory = { LiveHerdrClient(socketPath: $0) }
@@ -78,6 +82,7 @@ public actor MachineSession {
             self.herdrVersion = handshake.version
             reachability = .connected
             try await resync()
+            hasSyncedSinceConnect = true
             startEventLoop(client)
         } catch {
             // The reason is shown verbatim in the panel. Transport errors
@@ -91,6 +96,7 @@ public actor MachineSession {
     public func stop() async {
         eventTask?.cancel()
         eventTask = nil
+        hasSyncedSinceConnect = false
         await client?.disconnect()
         client = nil
         await transport.deactivate()
@@ -106,11 +112,12 @@ public actor MachineSession {
         let snapshot = try await client.snapshot()
         workspaceNames = snapshot.workspaceNames
         let output = await readOutput(for: snapshot.panes, using: client)
-        // One extra round trip for the whole machine, because the state-change
-        // stamps live on herdr's agent view and the snapshot's pane records do
-        // not carry them. Without it every intervention would be unguarded.
-        let stateSeqs = await readStateSeqs(using: client)
-        var incoming = snapshot.agents(on: machine.id, output: output, stateSeqs: stateSeqs)
+        // One extra round trip for the whole machine, because herdr's agent
+        // view carries two things the snapshot's pane records do not: the
+        // state-change stamps, without which every intervention is unguarded,
+        // and a `done` status, without which no agent ever reads as finished.
+        let agentViews = await readAgentViews(using: client)
+        var incoming = snapshot.agents(on: machine.id, output: output, agentViews: agentViews)
         if !hasRestoredDwell, !incoming.isEmpty {
             incoming = DwellMemory.restore(incoming, from: restorableDwell)
             hasRestoredDwell = true
@@ -119,11 +126,9 @@ public actor MachineSession {
         agents = reconcile(incoming)
     }
 
-    private func readStateSeqs(using client: any HerdrClient) async -> [String: UInt64] {
+    private func readAgentViews(using client: any HerdrClient) async -> [String: HerdrAgentInfo] {
         guard let infos = try? await client.agents() else { return [:] }
-        return Dictionary(
-            infos.map { ($0.paneId, $0.stateChangeSeq) }, uniquingKeysWith: { first, _ in first }
-        )
+        return Dictionary(infos.map { ($0.paneId, $0) }, uniquingKeysWith: { first, _ in first })
     }
 
     /// Fetch the output tail for every pane running an agent, concurrently.
@@ -339,16 +344,21 @@ public actor MachineSession {
             // happens for a pane that has actually stopped: a working agent's
             // output changes constantly and nothing is waiting on it.
             var output: String?
-            var stateSeq: UInt64?
+            var view: HerdrAgentInfo?
             if pane.agent?.isEmpty == false, Self.warrantsOutputRead(pane.agentStatus) {
                 output = try? await client?.readPane(paneId: pane.paneId, lines: 60)
                 // Fetched exactly where the output is, and for the same reason:
                 // these are the panes that have stopped and can therefore be
                 // acted on. A working pane emits these events continuously and
                 // offers nothing to answer, so it is not worth a round trip.
-                stateSeq = try? await client?.agent(paneId: pane.paneId)?.stateChangeSeq
+                //
+                // The whole record, not just its stamp: the pane in hand says
+                // `idle` for a finished run because `PaneAgentState` has no
+                // `done`, and this call is the only thing on this path that
+                // can tell the two apart.
+                view = try? await client?.agent(paneId: pane.paneId)
             }
-            patch(pane, output: output, stateSeq: stateSeq)
+            patch(pane, output: output, view: view)
 
         case .paneClosed(let paneId):
             agents.removeAll { $0.ref.agent.raw == paneId }
@@ -360,26 +370,54 @@ public actor MachineSession {
 
         case .connected:
             reachability = .connected
+            // A reconnect, not a first connect: the subscription thread drops
+            // its socket, backs off and resubscribes on its own, and herdr
+            // does not replay what happened while it was gone. Every state
+            // change in that window is simply missing, and nothing else ever
+            // refetches — `resync` otherwise runs only at start, on a topology
+            // event, and after an intervention, so the list stays frozen at
+            // whatever it held when the socket dropped while the machine goes
+            // on reporting itself connected.
+            //
+            // That is the shape of "only the local machine updates": a unix
+            // socket on this Mac effectively never drops, and an `ssh -L`
+            // forward to another host does.
+            if !hasSyncedSinceConnect {
+                try? await resync()
+                hasSyncedSinceConnect = true
+            }
 
         case .disconnected:
-            reachability = .reconnecting(attempt: 1)
+            hasSyncedSinceConnect = false
+            reachability = .reconnecting(attempt: nextReconnectAttempt())
         }
+    }
+
+    /// The attempt number to report while the subscription is down.
+    ///
+    /// Counted, not hardcoded to 1. It was written as `attempt: 1`, so a
+    /// machine that had been retrying for ten minutes said "reconnecting
+    /// (attempt 1)" — a number the panel presented as measured and that was
+    /// invented on every drop.
+    private func nextReconnectAttempt() -> Int {
+        if case .reconnecting(let attempt) = reachability { return attempt + 1 }
+        return 1
     }
 
     /// Apply one pane to the agent list, preserving dwell when the state has
     /// not actually changed.
-    private func patch(_ pane: HerdrPane, output: String?, stateSeq: UInt64? = nil) {
+    private func patch(_ pane: HerdrPane, output: String?, view: HerdrAgentInfo? = nil) {
         var outputs: [String: String] = [:]
         if let output { outputs[pane.paneId] = output }
-        var stateSeqs: [String: UInt64] = [:]
-        if let stateSeq { stateSeqs[pane.paneId] = stateSeq }
+        var views: [String: HerdrAgentInfo] = [:]
+        if let view { views[pane.paneId] = view }
 
         let incoming = HerdrSnapshot(
             herdrVersion: herdrVersion ?? "",
             protocolVersion: 0,
             panes: [pane],
             workspaceNames: workspaceNames
-        ).agents(on: machine.id, output: outputs, stateSeqs: stateSeqs)
+        ).agents(on: machine.id, output: outputs, agentViews: views)
 
         // A pane that stopped being an agent — the agent exited but the shell
         // lives on — drops out of the list rather than freezing on its last

@@ -18,6 +18,12 @@ public struct HerdrPane: Sendable, Equatable {
     public let agent: String?
     public let title: String?
     public let cwd: String?
+    /// Free-form metadata a pane reported through `pane.report_metadata`.
+    ///
+    /// herdr has no model field of its own, so agents and plugins report one
+    /// here. Keys are capped at 32 characters and values are strings; nothing
+    /// in herdr assigns them meaning.
+    public let tokens: [String: String]
     /// herdr's `revision` for the pane, decoded faithfully and used for
     /// nothing.
     ///
@@ -37,6 +43,7 @@ public struct HerdrPane: Sendable, Equatable {
         agent: String?,
         title: String?,
         cwd: String?,
+        tokens: [String: String] = [:],
         revision: UInt64
     ) {
         self.paneId = paneId
@@ -46,7 +53,25 @@ public struct HerdrPane: Sendable, Equatable {
         self.agent = agent
         self.title = title
         self.cwd = cwd
+        self.tokens = tokens
         self.revision = revision
+    }
+
+    /// The model this pane's agent is running, when a reporter named one.
+    ///
+    /// herdr itself reports no model, so this reads the metadata tokens. The
+    /// quota plugin — measured on both a local and a remote machine — writes
+    /// `quota_model` (`deepseek-v4.1-flash`, `gpt-5.6-luna`). A bare `model`
+    /// token is accepted first so a first-party reporter would work unchanged.
+    /// Nil rather than a guess when neither is present: Codex has no reliably
+    /// observable active model, and an empty chip is better than a wrong one.
+    public var model: String? {
+        for key in ["model", "quota_model"] {
+            if let value = tokens[key]?.trimmingCharacters(in: .whitespaces), !value.isEmpty {
+                return value
+            }
+        }
+        return nil
     }
 }
 

@@ -31,6 +31,7 @@ extension LiveHerdrClient {
 
     static func decodePane(_ pane: [String: Any]) -> HerdrPane? {
         guard let paneId = pane["pane_id"] as? String, !paneId.isEmpty else { return nil }
+        let rawTokens = pane["tokens"] as? [String: Any] ?? [:]
         return HerdrPane(
             paneId: paneId,
             workspaceId: pane["workspace_id"] as? String ?? "",
@@ -42,6 +43,9 @@ extension LiveHerdrClient {
             // `foreground_cwd` is what the pane is actually working in; `cwd`
             // is where the shell started. They differ the moment anyone cds.
             cwd: pane["foreground_cwd"] as? String ?? pane["cwd"] as? String,
+            // A metadata value can be null, and a null token means the reporter
+            // withdrew it; keeping only strings matches that intent.
+            tokens: rawTokens.compactMapValues { $0 as? String },
             revision: (pane["revision"] as? NSNumber)?.uint64Value ?? 0
         )
     }
