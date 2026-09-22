@@ -168,7 +168,8 @@ struct PromptAffordancesTests {
             // herdr refuses agent.prompt on a blocked agent outright, so the
             // button is hidden rather than shown and then failing.
             #expect(!actions.canNudge, "\(state)")
-            #expect(actions.canInterrupt, "\(state)")
+            // The conversation can still be ended while it is blocked.
+            #expect(actions.canEnd, "\(state)")
         }
 
         // Offering Approve on a working agent would send a `y` into a running
@@ -217,7 +218,7 @@ struct PromptAffordancesTests {
         // every one of these would be a button that silently does not work.
         let actions = subject.actions(for: .crashed, recentOutput: "run (once) (y)")
         #expect(actions == .none)
-        for intervention in [Intervention.approve, .deny, .interrupt, .nudge("go on"), .reply("yes"), .reveal] {
+        for intervention in [Intervention.approve, .deny, .end, .nudge("go on"), .reply("yes"), .reveal] {
             #expect(!actions.allows(intervention), "\(intervention)")
         }
     }
@@ -230,8 +231,9 @@ struct PromptAffordancesTests {
         )
         #expect(!menu.allows(.approve))
         #expect(menu.allows(.deny))
-        #expect(menu.allows(.interrupt))
         #expect(!menu.allows(.nudge("x")))
+        // End is offered wherever the agent is alive, blocked included.
+        #expect(menu.allows(.end))
     }
 }
 

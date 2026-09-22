@@ -36,6 +36,115 @@ public struct PromptAffordances: Sendable {
         return (Self.affirmativeKey(in: footer), Self.negativeKey(in: footer))
     }
 
+    /// The key a pane says will *exit* the agent, or nil where it says
+    /// nothing.
+    ///
+    /// Two shapes, both taken from live panes:
+    ///
+    /// - Paired: `ctrl+c/ctrl+d clear/exit` — pi's input footer, read off the
+    ///   user's own herd. The keys and the verbs are two parallel lists, and
+    ///   they have to be zipped rather than scanned. Scanning would find
+    ///   "ctrl+c" and "exit" on one line and send `C-c`, which on pi clears
+    ///   the input and exits nothing.
+    /// - Direct: `ctrl+d to exit`, `q to quit`, `press ctrl-c again to exit`.
+    ///
+    /// Returns herdr's own key spelling, not the agent's.
+    public func exitKey(inRecentOutput output: String?) -> String? {
+        guard let output, !output.isEmpty else { return nil }
+        let footer = Self.footer(of: output)
+        return Self.pairedExitKey(in: footer) ?? Self.directExitKey(in: footer)
+    }
+
+    /// The key a pane is asking to have pressed *again* in order to exit,
+    /// after a first press has already landed — Claude Code's
+    /// "Press Ctrl-C again to exit".
+    ///
+    /// Separate from ``exitKey(inRecentOutput:)`` because it means something
+    /// different: not "this key exits" but "you are one press away". It is
+    /// only ever read from a pane re-read after a key was sent, which is what
+    /// makes acting on it honest rather than a guess about a second press.
+    public func exitConfirmationKey(inRecentOutput output: String?) -> String? {
+        guard let output, !output.isEmpty else { return nil }
+        for line in Self.footer(of: output).reversed() {
+            guard let match = line.range(
+                of: Self.exitConfirmationPattern,
+                options: [.regularExpression, .caseInsensitive]
+            ) else { continue }
+            guard let key = Self.capture(in: String(line[match]), of: Self.exitConfirmationPattern)
+            else { continue }
+            return Self.herdrKeyName(key)
+        }
+        return nil
+    }
+
+    /// `press ctrl-c again to exit`, `ctrl+c again to quit`, `esc again to exit`.
+    static let exitConfirmationPattern =
+        #"(?:press\s+)?(ctrl[+-]\w|\^\w|c-\w|esc|escape|q)\s+again\s+(?:to\s+)?(?:exit|quit)\b"#
+
+    /// `ctrl+c/ctrl+d clear/exit` — parallel key and verb lists.
+    static func pairedExitKey(in footer: [String]) -> String? {
+        let pattern = #"((?:ctrl[+-]\w|\^\w|c-\w|esc|q)(?:/(?:ctrl[+-]\w|\^\w|c-\w|esc|q))+)\s+(\w+(?:/\w+)+)"#
+        for line in footer.reversed() {
+            guard let match = line.range(
+                of: pattern, options: [.regularExpression, .caseInsensitive]
+            ) else { continue }
+            let fragment = String(line[match])
+            guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]),
+                  let hit = regex.firstMatch(
+                      in: fragment,
+                      range: NSRange(fragment.startIndex..<fragment.endIndex, in: fragment)
+                  ),
+                  let keysRange = Range(hit.range(at: 1), in: fragment),
+                  let verbsRange = Range(hit.range(at: 2), in: fragment)
+            else { continue }
+
+            let keys = fragment[keysRange].split(separator: "/").map(String.init)
+            let verbs = fragment[verbsRange].split(separator: "/").map { $0.lowercased() }
+            // Only a same-length pairing carries meaning. `a/b/c x/y` says
+            // nothing about which key goes with which verb.
+            guard keys.count == verbs.count else { continue }
+            for (key, verb) in zip(keys, verbs) where verb == "exit" || verb == "quit" {
+                return herdrKeyName(key)
+            }
+        }
+        return nil
+    }
+
+    /// `ctrl+d to exit`, `q to quit`.
+    static func directExitKey(in footer: [String]) -> String? {
+        let pattern = #"(\bctrl[+-]\w|\^\w|\bc-\w|\besc|\bescape|\bq)\b\s+(?:to\s+)?(?:exit|quit)\b"#
+        for line in footer.reversed() {
+            guard let match = line.range(
+                of: pattern, options: [.regularExpression, .caseInsensitive]
+            ) else { continue }
+            if let key = capture(in: String(line[match]), of: pattern) {
+                return herdrKeyName(key)
+            }
+        }
+        return nil
+    }
+
+    /// Translate what an agent printed into what `pane.send_keys` accepts.
+    ///
+    /// `ctrl+d`, `^d` and `c-d` are three spellings of one key and herdr takes
+    /// exactly one of them. `C-c` is the proven case — it is what Decline and
+    /// Stop already send — and the rest follow its shape. A miss here is
+    /// visible and harmless: herdr answers `invalid_key`, `MachineSession`
+    /// turns that into a refusal the row prints, and nothing reaches the pane.
+    static func herdrKeyName(_ key: String) -> String {
+        let lower = key.lowercased()
+        if lower == "escape" || lower == "esc" { return "esc" }
+        if lower == "q" { return "q" }
+        if let letter = lower.split(whereSeparator: { "+-^".contains($0) }).last,
+           letter.count == 1, lower != letter {
+            return "C-\(letter)"
+        }
+        if lower.hasPrefix("^"), lower.count == 2 {
+            return "C-\(lower.dropFirst())"
+        }
+        return lower
+    }
+
     // MARK: - Affirmative
 
     /// Patterns where the prompt spells out a key that means "go ahead".
@@ -140,6 +249,15 @@ public struct PromptAffordances: Sendable {
 // MARK: - Actions
 
 public extension PromptAffordances {
+    /// What End presses first when the pane named no exit key of its own.
+    ///
+    /// Not a guess in the sense invariant 11 forbids: `C-c` is the terminal's
+    /// own interrupt, delivered as a signal to the foreground process group —
+    /// verified against herdr 0.9.1, where it produced `^C` in a pane running
+    /// `sleep 300` and returned the shell prompt. It is the opening of a
+    /// two-step gesture, and nothing follows it unless the pane asks.
+    static let defaultInterruptKey = "C-c"
+
     /// What the panel may offer for one agent.
     ///
     /// Reads the state, not the provider: the two answering actions exist only
@@ -155,7 +273,7 @@ public extension PromptAffordances {
             return AgentActions(
                 approveKey: keys.approve,
                 denyKey: keys.deny,
-                canInterrupt: true,
+                canEnd: true,
                 canNudge: false,
                 canReveal: true,
                 // Only the open question takes words. An approval prompt's
@@ -165,12 +283,12 @@ public extension PromptAffordances {
             )
 
         case .working:
-            return AgentActions(canInterrupt: true, canNudge: true, canReveal: true)
+            return AgentActions(canEnd: true, canNudge: true, canReveal: true)
 
         case .rateLimited, .ciFailed, .mergeConflict, .finished, .idle, .unknown:
             // Stopped but alive. There is nothing to answer, and a new
             // instruction is the useful thing to send.
-            return AgentActions(canInterrupt: true, canNudge: true, canReveal: true)
+            return AgentActions(canEnd: true, canNudge: true, canReveal: true)
 
         case .crashed:
             // The process is gone. Every one of these would be sent into a

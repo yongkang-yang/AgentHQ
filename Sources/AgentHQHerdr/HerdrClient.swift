@@ -203,7 +203,6 @@ public protocol HerdrClient: Sendable {
     func sendKeys(paneId: String, keys: [String]) async throws
     func sendText(paneId: String, text: String) async throws
     func prompt(paneId: String, text: String) async throws
-    func interrupt(paneId: String) async throws
 
     /// Bring a pane to the front in its own herdr: the pane, and the workspace
     /// and tab holding it, or focusing the pane alone leaves it on a workspace

@@ -97,9 +97,6 @@ private actor RecordingClient: HerdrClient {
     func prompt(paneId: String, text: String) async throws {
         sent.prompts.append((paneId, text))
     }
-    func interrupt(paneId: String) async throws {
-        sent.interrupts.append(paneId)
-    }
     func focusPane(paneId: String) async throws {
         sent.focused.append(paneId)
     }
@@ -277,21 +274,6 @@ struct InterventionGuardTests {
         #expect(await client.sent.keys.map(\.keys) == [["esc"]])
     }
 
-    // MARK: Interrupt
-
-    @Test("interrupt does not depend on the prompt, only on the stamp")
-    func interruptIgnoresPromptChanges() async throws {
-        let client = makeClient()
-        let session = await session(client: client)
-
-        // The pane now shows something else entirely. Interrupt still applies:
-        // it stops whatever is running rather than answering anything.
-        await client.setOutput(Self.paneId, to: "…thinking…")
-
-        try await session.perform(.interrupt, on: AgentID(Self.paneId))
-        #expect(await client.sent.interrupts == [Self.paneId])
-    }
-
     // MARK: Reply
 
     /// An open question, so the row offers Reply rather than Approve.
@@ -386,16 +368,17 @@ struct InterventionGuardTests {
         #expect(await client.sent.focused == [Self.paneId])
     }
 
-    @Test("interrupt still refuses an agent that already moved")
-    func interruptRefusesMovedAgent() async throws {
-        // An agent that finished on its own must not be interrupted after the
-        // fact — the keystroke would land in whatever came next.
+    @Test("a nudge still refuses an agent that already moved")
+    func nudgeRefusesMovedAgent() async throws {
+        // An agent that finished on its own must not be handed an instruction
+        // written for the turn it was running — the text would land in
+        // whatever came next.
         let client = makeClient(seq: 100)
         let session = await session(client: client)
         await client.setLiveAgent(Self.paneId, to: info(status: "done", seq: 140))
 
         await #expect(throws: InterventionError.self) {
-            try await session.perform(.interrupt, on: AgentID(Self.paneId))
+            try await session.perform(.nudge("keep going"), on: AgentID(Self.paneId))
         }
         #expect(await client.sent.isEmpty)
     }

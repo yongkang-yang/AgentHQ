@@ -148,8 +148,6 @@ public actor LiveHerdrClient: HerdrClient {
         _ = try await request(method: "agent.prompt", params: ["target": paneId, "text": text])
     }
 
-    /// `C-c`, verified against herdr 0.9.1: sent to a pane running `sleep 300`
-    /// it produced `^C` and returned the shell prompt.
     public func focusPane(paneId: String) async throws {
         // Workspace first, then the pane: focusing the pane alone on a
         // workspace that is not showing leaves it behind whatever is.
@@ -157,10 +155,6 @@ public actor LiveHerdrClient: HerdrClient {
             _ = try? await request(method: "workspace.focus", params: ["workspace_id": workspaceId])
         }
         _ = try await request(method: "pane.focus", params: ["pane_id": paneId])
-    }
-
-    public func interrupt(paneId: String) async throws {
-        try await sendKeys(paneId: paneId, keys: ["C-c"])
     }
 
     // MARK: - Transport

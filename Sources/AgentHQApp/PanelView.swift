@@ -289,6 +289,9 @@ private struct AgentRow: View {
     @State private var compose = ""
     /// Text staged by Send and awaiting Confirm.
     @State private var pendingCompose: String?
+    /// Whether End is staged and waiting to be confirmed. Never sends on its
+    /// own — see the confirmation row.
+    @State private var pendingEnd = false
     /// Which text action the box is currently for. Nudge and reply travel
     /// different herdr calls and are valid in opposite states, so the box has
     /// to remember which one opened it.
@@ -509,14 +512,14 @@ private struct AgentRow: View {
                         run(.deny)
                     }
                 }
-                if available.canInterrupt {
-                    ActionButton(title: "Stop", tint: Brand.machineDown) {
-                        // Says what it sent. Interrupt frequently changes
-                        // nothing the row can show — the agent catches the
-                        // signal and carries on, or herdr has not re-detected
-                        // it yet — and a silent success is indistinguishable
-                        // from a button that does not work.
-                        run(.interrupt, note: "Sent ⌃C.")
+                if available.canEnd {
+                    // Staged, never sent on the first click. This is the only
+                    // action in the panel that destroys something the user
+                    // cannot get back, and the panel is a list of
+                    // near-identical rows with the buttons in the same place
+                    // on each — so the confirmation names the row.
+                    ActionButton(title: "End", tint: Brand.machineDown) {
+                        pendingEnd.toggle()
                     }
                 }
                 if available.canReply {
@@ -546,6 +549,26 @@ private struct AgentRow: View {
             }
             .padding(.top, 2)
             .disabled(isSending)
+
+            if pendingEnd {
+                HStack(spacing: 6) {
+                    Text("End \(agent.provider) in \(agent.project) on \(machineName)?")
+                        .font(Brand.sectionLabel)
+                        .foregroundStyle(Brand.secondaryText)
+                    ActionButton(title: "End it", tint: Brand.machineDown) {
+                        pendingEnd = false
+                        run(.end, note: "Asked \(agent.provider) to exit.")
+                    }
+                    ActionButton(title: "Cancel", tint: Brand.secondaryText) {
+                        pendingEnd = false
+                    }
+                    Spacer(minLength: 0)
+                }
+                .padding(.top, 2)
+                Text("The conversation ends. Its pane and output stay.")
+                    .font(Brand.sectionLabel)
+                    .foregroundStyle(Brand.secondaryText)
+            }
 
             if let kind = composing {
                 if let pending = pendingCompose {

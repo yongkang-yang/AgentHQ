@@ -372,13 +372,8 @@ public actor MachineSession {
             try await verifyPromptStillOffers(key, agent: agent, intervention: intervention, using: client)
             try await send { try await client.sendKeys(paneId: agentId.raw, keys: [key]) }
 
-        case .interrupt:
-            // No prompt check: interrupt does not depend on what the pane is
-            // showing, only on there being something to stop. The stamp check
-            // stays, so an agent that finished on its own is not interrupted
-            // after the fact.
-            try await verifyUnmoved(agent, using: client)
-            try await send { try await client.interrupt(paneId: agentId.raw) }
+        case .end:
+            try await endConversation(agent, using: client)
 
         case .reveal:
             // No stamp check, and no prompt check. This is the one action that
@@ -419,16 +414,70 @@ public actor MachineSession {
         try? await resync()
     }
 
+    /// Quit the agent, taking every key from the pane rather than from a table
+    /// of which agent is running.
+    ///
+    /// No stamp check, for the same reason ``Intervention/reveal`` has none:
+    /// the target is a pane id, and ending *this* conversation means the same
+    /// thing whatever state it happens to be in. Refusing because the agent
+    /// finished a second ago would refuse precisely when ending is most
+    /// obviously right. The confirmation the panel shows is the guard here.
+    ///
+    /// Three steps, each one reading before it presses:
+    ///
+    /// 1. **Ask the pane what exits it.** pi's own footer says
+    ///    `ctrl+c/ctrl+d clear/exit` — two parallel lists, in which `ctrl+c`
+    ///    is *clear* and `ctrl+d` is exit. An agent that names its exit key
+    ///    gets that key, once, and is done.
+    /// 2. **Otherwise press `C-c` and look again.** This is the two-step
+    ///    gesture, and the second step is only taken because the pane asked
+    ///    for it — Claude Code answers the first press with "Press Ctrl-C
+    ///    again to exit", and that sentence is the authority for pressing it
+    ///    again. Not a count, and not a rule about which agent this is.
+    /// 3. **Where nothing was offered, stop and say so.** One `C-c` has
+    ///    landed by then and cannot be taken back, so the refusal names what
+    ///    was sent instead of claiming nothing happened.
+    private func endConversation(_ agent: Agent, using client: any HerdrClient) async throws {
+        let paneId = agent.ref.agent.raw
+        let affordances = PromptAffordances()
+
+        let before = try? await client.readPane(paneId: paneId, lines: 60)
+        if let named = affordances.exitKey(inRecentOutput: before),
+           named != PromptAffordances.defaultInterruptKey {
+            try await send { try await client.sendKeys(paneId: paneId, keys: [named]) }
+            return
+        }
+
+        let first = PromptAffordances.defaultInterruptKey
+        try await send { try await client.sendKeys(paneId: paneId, keys: [first]) }
+
+        // The agent needs a moment to redraw before it can be asked whether it
+        // is offering to exit. Reading instantly would read the pane as it was
+        // before the key landed and conclude, wrongly, that nothing was
+        // offered — then say so, having half-quit the agent.
+        try? await Task.sleep(for: .milliseconds(400))
+        let after = try? await client.readPane(paneId: paneId, lines: 60)
+        guard let again = affordances.exitConfirmationKey(inRecentOutput: after)
+                ?? affordances.exitKey(inRecentOutput: after)
+        else {
+            throw InterventionError.exitNotConfirmed(sent: first)
+        }
+        try await send { try await client.sendKeys(paneId: paneId, keys: [again]) }
+    }
+
     /// Re-read the agent and require that it has not moved since the panel drew
     /// the row being acted on.
     private func verifyUnmoved(_ agent: Agent, using client: any HerdrClient) async throws {
         guard let info = try await client.agent(paneId: agent.ref.agent.raw) else {
             throw InterventionError.agentGone
         }
-        // No stamp means the row was built from an event that carried none, and
-        // an unguarded send is exactly what this method exists to prevent.
+        // No stamp means the row was built from an event that carried none and
+        // the agent view could not be reached to supply one, so there is
+        // nothing to compare against. An unguarded send is exactly what this
+        // method exists to prevent, so it still refuses — but it says it
+        // could not check, rather than claiming a move it did not observe.
         guard let expected = agent.stateSeq else {
-            throw InterventionError.stateMoved(was: agent.state, isNow: agent.state)
+            throw InterventionError.unverifiable
         }
         guard info.stateChangeSeq == expected else {
             throw InterventionError.stateMoved(
@@ -500,18 +549,35 @@ public actor MachineSession {
             // output changes constantly and nothing is waiting on it.
             var output: String?
             var view: HerdrAgentInfo?
-            if pane.agent?.isEmpty == false, Self.warrantsOutputRead(pane.agentStatus) {
-                output = try? await client?.readPane(paneId: pane.paneId, lines: 60)
-                // Fetched exactly where the output is, and for the same reason:
-                // these are the panes that have stopped and can therefore be
-                // acted on. A working pane emits these events continuously and
-                // offers nothing to answer, so it is not worth a round trip.
+            if pane.agent?.isEmpty == false {
+                let hasStopped = Self.warrantsOutputRead(pane.agentStatus)
+                let moved = hasMoved(pane)
+                if hasStopped {
+                    output = try? await client?.readPane(paneId: pane.paneId, lines: 60)
+                }
+                // The agent view is fetched for a stopped pane, and for any
+                // pane whose state has just changed.
                 //
-                // The whole record, not just its stamp: the pane in hand says
-                // `idle` for a finished run because `PaneAgentState` has no
-                // `done`, and this call is the only thing on this path that
-                // can tell the two apart.
-                view = try? await client?.agent(paneId: pane.paneId)
+                // Stopped, because the pane record cannot say `done` — it
+                // spells a finished run `idle`, and this call is the only
+                // thing on this path that tells the two apart.
+                //
+                // Changed, because the stamp lives only on the agent view, and
+                // a row rebuilt without one cannot be acted on at all: the
+                // guard in `perform` fails closed on a nil stamp, by design.
+                // Fetching only for stopped panes meant an agent that had just
+                // *started* working had no stamp until the next full resync —
+                // so Stop refused, and said "it moved from working to working
+                // first", for the entire window in which anyone wants to press
+                // Stop.
+                //
+                // This is O(state changes), not O(events), which is what makes
+                // it affordable. A working agent emits `pane_updated`
+                // continuously as it writes output, and those carry the status
+                // it already has: they compare equal here and cost nothing.
+                if hasStopped || moved {
+                    view = try? await client?.agent(paneId: pane.paneId)
+                }
             }
             patch(pane, output: output, view: view)
 
@@ -557,6 +623,22 @@ public actor MachineSession {
     private func nextReconnectAttempt() -> Int {
         if case .reconnecting(let attempt) = reachability { return attempt + 1 }
         return 1
+    }
+
+    /// Whether this pane record disagrees with the state the list is holding
+    /// for it.
+    ///
+    /// Compared as classified states rather than as raw status strings,
+    /// because the two vocabularies do not line up: a pane says `idle` for a
+    /// run the list is holding as `finished`. Comparing the strings would call
+    /// every such event a change and spend a round trip on it.
+    private func hasMoved(_ pane: HerdrPane) -> Bool {
+        guard let current = agents.first(where: { $0.ref.agent.raw == pane.paneId }) else {
+            // New to the list. One round trip to start it off with a stamp is
+            // the same cost the next resync would pay anyway.
+            return true
+        }
+        return StateClassifier().classify(status: pane.agentStatus).state != current.state
     }
 
     /// Apply one pane to the agent list, preserving dwell when the state has

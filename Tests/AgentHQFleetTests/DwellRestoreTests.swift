@@ -39,7 +39,6 @@ private actor DwellClient: HerdrClient {
     func sendKeys(paneId: String, keys: [String]) async throws {}
     func sendText(paneId: String, text: String) async throws {}
     func prompt(paneId: String, text: String) async throws {}
-    func interrupt(paneId: String) async throws {}
     func focusPane(paneId: String) async throws {}
 }
 

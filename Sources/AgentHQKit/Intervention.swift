@@ -16,9 +16,6 @@ public enum Intervention: Sendable, Equatable {
     /// Decline it, pressing the key the prompt itself named.
     case deny
 
-    /// Stop whatever the agent is doing, without answering anything.
-    case interrupt
-
     /// Hand the agent a new instruction while it is working.
     case nudge(String)
 
@@ -31,6 +28,24 @@ public enum Intervention: Sendable, Equatable {
     /// control doing both would send text down a path herdr rejects half the
     /// time.
     case reply(String)
+
+    /// End the conversation: quit the agent, leaving its pane alive.
+    ///
+    /// The panel's only terminating action. An "interrupt the current turn"
+    /// action existed alongside it briefly and was removed: stopping a turn is
+    /// something you do while watching the agent, in the agent, and a triage
+    /// panel that is not where you are watching from adds a second button
+    /// whose difference from this one has to be explained every time.
+    ///
+    /// The pane and its scrollback survive, which is what keeps Show output
+    /// readable afterwards — the alternative, `pane.close`, would take the
+    /// record of what the agent did with it.
+    ///
+    /// There is no single key for this and no manifest names one: herdr's
+    /// agent manifests carry detection rules, not exit affordances. So it is
+    /// resolved from the pane's own footer, and where the pane says nothing it
+    /// stops rather than guessing. See `MachineSession.perform`.
+    case end
 
     /// Bring the agent's pane to the front in its own herdr.
     ///
@@ -69,9 +84,6 @@ public struct AgentActions: Sendable, Equatable {
     /// direction that cannot do something the user did not ask for.
     public var denyKey: String?
 
-    /// Sending `C-c`. Offered whenever there is a live agent to send it to.
-    public var canInterrupt: Bool
-
     /// Submitting a prompt. False while the agent is blocked, because herdr
     /// refuses it there — `agent.prompt` on a blocked agent comes back
     /// `agent_blocked: requires interactive input`. The button is hidden
@@ -81,6 +93,10 @@ public struct AgentActions: Sendable, Equatable {
     /// Focusing the pane. True whenever there is a pane to focus, which is
     /// every live agent — so this is the row's one dependable action.
     public var canReveal: Bool
+
+    /// Quitting the agent. Offered wherever there is a live agent, because
+    /// ending a conversation does not depend on what it is currently doing.
+    public var canEnd: Bool
 
     /// Typing an answer. True only for ``AgentState/needsInput``.
     ///
@@ -94,14 +110,14 @@ public struct AgentActions: Sendable, Equatable {
     public init(
         approveKey: String? = nil,
         denyKey: String? = nil,
-        canInterrupt: Bool = false,
+        canEnd: Bool = false,
         canNudge: Bool = false,
         canReveal: Bool = false,
         canReply: Bool = false
     ) {
         self.approveKey = approveKey
         self.denyKey = denyKey
-        self.canInterrupt = canInterrupt
+        self.canEnd = canEnd
         self.canNudge = canNudge
         self.canReveal = canReveal
         self.canReply = canReply
@@ -113,7 +129,7 @@ public struct AgentActions: Sendable, Equatable {
         switch intervention {
         case .approve:   return approveKey != nil
         case .deny:      return denyKey != nil
-        case .interrupt: return canInterrupt
+        case .end:       return canEnd
         case .nudge:     return canNudge
         case .reveal:    return canReveal
         case .reply:     return canReply
@@ -143,8 +159,29 @@ public enum InterventionError: Error, Sendable, Equatable {
     /// is a different prompt than the one on screen. Nothing was sent.
     case promptChanged
 
+    /// The row carries no state-change stamp, so whether the agent has moved
+    /// cannot be established. Nothing was sent.
+    ///
+    /// Distinct from ``stateMoved`` because it is a different claim, and the
+    /// difference is the one invariant 3 is about: this says *we do not know*,
+    /// where `stateMoved` says *it moved*. Reported as the latter, a refusal
+    /// here rendered as "it moved from working to working first" — a sentence
+    /// that is not true, cannot be acted on, and reads as a broken button.
+    case unverifiable
+
     /// Not offered for this agent. A caller reaching past ``AgentActions``.
     case notOffered
+
+    /// ``Intervention/end`` pressed the key the pane named, and the agent
+    /// neither exited nor offered a confirmation to press again.
+    ///
+    /// **The one case here that reports something was sent.** Every other
+    /// refusal promises the opposite, and this one cannot: ending a
+    /// conversation is a two-step gesture on most agents, so the first key is
+    /// already in the pane by the time we learn the second one was never
+    /// offered. Saying "nothing happened" would be false, and saying nothing
+    /// would leave the user not knowing whether their agent is half-quit.
+    case exitNotConfirmed(sent: String)
 
     /// herdr refused, verbatim.
     case refused(code: String, message: String)
@@ -160,8 +197,12 @@ public extension InterventionError {
             return "It moved from \(was.rawValue) to \(isNow.rawValue) first — nothing sent."
         case .promptChanged:
             return "The prompt changed — nothing sent."
+        case .unverifiable:
+            return "Couldn't confirm this agent hasn't moved — nothing sent. Try again."
         case .notOffered:
             return "Not available for this agent."
+        case .exitNotConfirmed(let sent):
+            return "Sent \(sent), but this agent did not offer to exit — nothing further sent. Open it to finish."
         case .refused(let code, let message):
             return message.isEmpty ? "herdr refused: \(code)" : message
         }

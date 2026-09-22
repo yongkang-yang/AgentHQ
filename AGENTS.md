@@ -22,6 +22,28 @@ Tests live in `Tests/<Target>Tests/`.
 - `swift build` — compile all targets
 - `swift test` — run the Swift Testing suite
 - `swift run AgentHQApp` — launch the menu-bar app in development
+- `./build-app.sh` — rebuild `AgentHQ.app`, the installed menu-bar bundle
+
+**`swift build` does not update `AgentHQ.app`.** The two are separate
+binaries: `swift build` writes a debug build under `.build/`, and the bundle
+carries its own release build that only `build-app.sh` refreshes. A change
+verified with `swift build` and `swift test` is not in the app the user is
+looking at, and there is nothing on screen to say so — the menu bar item looks
+identical either way. It has already cost one round of "the fix doesn't work",
+where the binary under test was hours older than the fix.
+
+So when a change is to be checked in the running app rather than in tests, run
+`./build-app.sh` and restart it:
+
+```sh
+./build-app.sh
+osascript -e 'quit app "AgentHQ"' && open AgentHQ.app
+```
+
+`swift run AgentHQApp` is the other way to see a change, and it does use the
+fresh build — but it runs a second menu bar item alongside the installed one,
+and `TunnelReaper` means the one starting up will tear down the other's
+tunnels. Run one or the other, not both.
 
 ## Invariants
 
@@ -73,6 +95,21 @@ design discussion, not a refactor.
    So `Agent.stateSeq` is optional and the guard **fails closed**: a row with
    no stamp refuses to send rather than sending unguarded.
 
+   Which puts a standing obligation on every path that rebuilds a row: carry
+   a stamp for the state being shown. A `pane_updated` event carries none, so
+   `MachineSession` fetches the agent view whenever a pane's state disagrees
+   with the list — not only when the pane has stopped. Fetching only for
+   stopped panes left an agent that had just *started* working with no stamp
+   until the next full resync, so Stop and Nudge refused for that entire
+   window, which is the only window anyone wants either of them in. The
+   condition is a state *change*, not an event, which is what keeps it
+   affordable: a chatty working agent's output events carry the status it
+   already has and cost nothing.
+
+   And a refusal with no stamp is `unverifiable`, never `stateMoved`. The
+   latter asserts a move that was never observed; reported that way it
+   printed "It moved from working to working first — nothing sent."
+
 9. **A pane record cannot say `done`. The agent view can.** herdr has two
    status enums, both spelled `agent_status`, both decoding cleanly:
 
@@ -122,6 +159,46 @@ design discussion, not a refactor.
     "enter to confirm", and enter there takes whichever row is highlighted —
     which herdr reports nothing about. An Approve button there would be
     pressing enter and hoping.
+
+    **The panel has one terminating action, End, and it is not an interrupt.**
+    A Stop button that interrupted the current turn existed briefly and was
+    removed at the user's request — stopping a turn is something you do while
+    watching the agent, in the agent, and a second terminating button whose
+    difference from End has to be explained every time is not worth the row.
+
+    It is worth keeping why it could never have been a hardcoded `C-c`,
+    because the same evidence governs End. Measured across herdr's agent
+    manifests, `C-c` is the wrong interrupt key for most agents:
+    `esc to interrupt` for claude, devin, letta and muse; `esc to stop` for
+    droid; `ctrl+c to stop` for cursor; `ctrl+c to interrupt` for hermes; and
+    opencode ships both, by mode — the second half of this invariant inside a
+    single agent. For Claude Code the mistake is worse than a no-op: `esc`
+    interrupts the turn, while `C-c` is its *quit* gesture and twice in a row
+    exits the program.
+
+    **End reads its keys the same way.** `Intervention.end` quits the agent
+    and leaves the pane and its scrollback — `pane.close` would take the
+    record of what the agent did with it, and Show output depends on that.
+
+    No manifest names an exit key; herdr's manifests carry detection rules
+    only. So End reads the pane, in three steps, pressing nothing it was not
+    told about:
+
+    1. An exit key named in the footer is pressed once. pi's footer is
+       `ctrl+c/ctrl+d clear/exit` — two **parallel lists**, where `ctrl+c` is
+       *clear* and `ctrl+d` is exit. Scanning that line for "ctrl+c" and
+       "exit" and pressing `C-c` is the trap, and on pi it exits nothing.
+    2. Otherwise `C-c`, then re-read. A second press happens only because the
+       pane asked for it — "Press Ctrl-C again to exit" is the authority, not
+       a count and not a rule about which agent this is.
+    3. Where nothing was offered, stop. One `C-c` has landed by then, so
+       `exitNotConfirmed` names what was sent. It is the only
+       `InterventionError` that reports a keystroke having gone out, and the
+       only one allowed to.
+
+    End takes no staleness stamp — like Reveal, its target is a pane id and
+    means the same thing whatever state the agent is in. The panel's
+    confirmation is the guard, and End is the one action that gets one.
 12. **No continuous animation inside `MenuBarExtra`.** It causes the panel to
     flicker open and closed. Emphasis is static.
 
