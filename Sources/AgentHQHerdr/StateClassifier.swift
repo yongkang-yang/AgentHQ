@@ -106,8 +106,20 @@ public struct StateClassifier: Sendable {
     }
 
     /// The states whose row can carry more than its one-line reason.
+    ///
+    /// `finished` is here because a completed run's last words *are* its
+    /// result, and a row that shows none of them leaves the user with two
+    /// buttons and nothing to base them on — there is no way to write a
+    /// follow-up to an answer you cannot see. It only became worth showing
+    /// once ``trimmingInputFurniture`` stopped the excerpt ending on a status
+    /// bar.
+    ///
+    /// `idle` is deliberately not: an idle agent is sitting at its prompt and
+    /// may never have run anything, so its last lines are whatever was on
+    /// screen, not a result. The row offers the full output on demand instead.
     static let messageStates: Set<AgentState> = [
         .needsApproval, .needsInput, .mergeConflict, .ciFailed, .rateLimited,
+        .finished,
     ]
 
     private func coreClassify(status: String, recentOutput: String?) -> Classification {
@@ -252,7 +264,68 @@ public struct StateClassifier: Sendable {
             .split(separator: "\n", omittingEmptySubsequences: false)
             .map { condense(String($0)) }
             .filter { !$0.isEmpty }
-        return Array(lines.suffix(tailLines))
+        return Array(trimmingInputFurniture(lines).suffix(tailLines))
+    }
+
+    /// Drop the input box a terminal agent draws under its transcript.
+    ///
+    /// The bottom of an agent's pane is not the end of what it said. Below the
+    /// transcript sits a rule, then the prompt line, then a status bar — on a
+    /// real pi pane, measured:
+    ///
+    /// ```
+    ///  已切换到 research profile。default 的凭据已保存。   <- the answer
+    ///  ──────────────────────────────
+    ///  ~/github-repo/ob-research-altas (main)
+    ///  ↑394k ↓5.2k R1.1M CH99.0% $0.108 (sub) 25.3%/272k
+    ///  🔌 MCP: 4 servers enabled
+    /// ```
+    ///
+    /// All three closing lines carry letters and digits, so they survive every
+    /// filter below and the excerpt spends half its lines on furniture — with
+    /// the last line, the one the eye lands on, reading "MCP: 4 servers
+    /// enabled". This is why a finished run could not simply be added to
+    /// ``messageStates``.
+    ///
+    /// Structural, not provider-keyed: it looks for a rule the terminal drew,
+    /// never for which agent drew it, because a table inside the transcript is
+    /// made of the same characters and the difference is position, not source.
+    /// It trims only the **last** rule, so a table in the answer survives.
+    ///
+    /// Conservative on purpose. A rule with more than ``furnitureLines`` under
+    /// it is content, not a footer, and nothing is trimmed — better a noisy
+    /// excerpt than a silently truncated answer.
+    static func trimmingInputFurniture(_ lines: [String]) -> [String] {
+        guard let last = lines.lastIndex(where: isRule) else { return lines }
+        let trailing = lines.count - last - 1
+        guard trailing >= 1, trailing <= furnitureLines else { return lines }
+
+        // The rule is often drawn twice, once per border of the input box.
+        var start = last
+        while start > 0, isRule(lines[start - 1]) { start -= 1 }
+
+        // Never trim everything: a pane that is nothing but furniture is a
+        // pane we know nothing about, and saying so needs the furniture.
+        guard start > 0 else { return lines }
+        return Array(lines[..<start])
+    }
+
+    /// At most this many lines under a rule still read as an input box.
+    static let furnitureLines = 4
+
+    /// A line the terminal drew rather than wrote: box-drawing, dashes and
+    /// spaces, and long enough not to be punctuation in a sentence.
+    static func isRule(_ line: String) -> Bool {
+        let drawing = line.unicodeScalars.filter { scalar in
+            (0x2500...0x257F).contains(scalar.value)
+                || scalar == "-" || scalar == "=" || scalar == "_"
+        }
+        guard drawing.count >= 8 else { return false }
+        return line.unicodeScalars.allSatisfy { scalar in
+            (0x2500...0x257F).contains(scalar.value)
+                || scalar == "-" || scalar == "=" || scalar == "_"
+                || scalar == " " || scalar == "\u{00A0}"
+        }
     }
 
     /// What to quote when an agent is waiting but no rule matched.

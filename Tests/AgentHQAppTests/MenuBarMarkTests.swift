@@ -98,3 +98,23 @@ struct StateSymbolTests {
         )
     }
 }
+
+@Suite("The button that sends words says what it does")
+struct PromptActionLabelTests {
+    /// `agent.prompt` is the same call either way; what changes is what the
+    /// user is doing with it.
+    @Test("a working agent is nudged")
+    func working() {
+        #expect(Brand.promptAction(for: .working) == "Nudge")
+    }
+
+    /// Answering a finished run was labelled "Nudge", which reads as "hurry
+    /// up" — a completed conversation is continued, not hurried.
+    @Test("a stopped agent is continued, never nudged", arguments: [
+        AgentState.finished, .idle, .rateLimited, .ciFailed, .mergeConflict, .unknown,
+    ])
+    func stopped(state: AgentState) {
+        #expect(Brand.promptAction(for: state) == "Continue")
+        #expect(Brand.promptPlaceholder(for: state) != Brand.promptPlaceholder(for: .working))
+    }
+}

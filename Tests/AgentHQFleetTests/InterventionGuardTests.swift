@@ -76,7 +76,7 @@ private actor RecordingClient: HerdrClient {
         AsyncStream { _ in }
     }
 
-    func readPane(paneId: String, lines: Int) async throws -> String? {
+    func readPane(paneId: String, lines: Int, source: PaneReadSource) async throws -> String? {
         paneOutput[paneId]
     }
 

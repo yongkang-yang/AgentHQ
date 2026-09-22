@@ -163,6 +163,14 @@ public final class FleetStore {
         await refresh()
     }
 
+    /// One agent's recent output, verbatim, fetched when a row asks to show
+    /// it. Routed by machine for the same reason interventions are: a pane id
+    /// is only unique within its own herd.
+    public func transcript(for ref: AgentRef, lines: Int = 200) async throws -> String {
+        guard let session = sessions[ref.machine] else { throw InterventionError.agentGone }
+        return try await session.transcript(for: ref.agent, lines: lines)
+    }
+
     /// Rebuild the snapshot from every session.
     ///
     /// Assembled as one value and assigned once, so a view never renders a

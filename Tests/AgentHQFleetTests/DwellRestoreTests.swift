@@ -28,7 +28,7 @@ private actor DwellClient: HerdrClient {
         )
     }
     nonisolated func events() -> AsyncStream<HerdrEvent> { AsyncStream { _ in } }
-    func readPane(paneId: String, lines: Int) async throws -> String? { nil }
+    func readPane(paneId: String, lines: Int, source: PaneReadSource) async throws -> String? { nil }
     func agents() async throws -> [HerdrAgentInfo] {
         [HerdrAgentInfo(
             paneId: "w:p1", agent: "claude", agentStatus: "idle",

@@ -282,6 +282,14 @@ private struct AgentRow: View {
     @State private var revealNote: String?
     @State private var failure: String?
 
+    /// The pane's recent output, once the user has asked to see it. Fetched
+    /// on demand rather than carried on every refresh — see
+    /// `MachineSession.transcript(for:lines:)`.
+    @State private var transcript: String?
+    @State private var isLoadingTranscript = false
+    @State private var transcriptFailure: String?
+    @State private var showsTranscript = false
+
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
             // The status rail. Colour is the state; a fluent reader takes in
@@ -351,6 +359,8 @@ private struct AgentRow: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
 
+                outputDisclosure
+
                 actions
             }
         }
@@ -371,6 +381,105 @@ private struct AgentRow: View {
     /// say `y` asks the user to trust that AgentHQ read the prompt correctly,
     /// and this is the one place in the product where a wrong reading is
     /// destructive rather than merely visible.
+    private func placeholder(for kind: ComposeKind) -> String {
+        switch kind {
+        case .reply: return kind.placeholder
+        case .nudge: return Brand.promptPlaceholder(for: agent.state)
+        }
+    }
+
+    // MARK: - Output
+
+    /// "What did it actually say?" — the question the excerpt above can only
+    /// ever half answer.
+    ///
+    /// The excerpt is condensed: whitespace collapsed, every line cut at 117
+    /// characters, six lines at most. That is right for a prompt the user has
+    /// to act on and wrong for a result they have to read. This shows what the
+    /// pane holds, wrapped but otherwise untouched.
+    @ViewBuilder private var outputDisclosure: some View {
+        // A dead pane has nothing to read, and herdr would answer a read for
+        // it with an error the row cannot act on.
+        if agent.state != .crashed {
+            VStack(alignment: .leading, spacing: 4) {
+                Button {
+                    toggleTranscript()
+                } label: {
+                    HStack(spacing: 3) {
+                        Image(systemName: showsTranscript ? "chevron.down" : "chevron.right")
+                            .font(.system(size: 8, weight: .bold))
+                        Text(showsTranscript ? "Hide output" : "Show output")
+                            .font(Brand.sectionLabel)
+                        if isLoadingTranscript {
+                            Text("…").font(Brand.sectionLabel)
+                        }
+                    }
+                    .foregroundStyle(Brand.secondaryText)
+                }
+                .buttonStyle(.plain)
+
+                if showsTranscript {
+                    if let transcriptFailure {
+                        Text(transcriptFailure)
+                            .font(Brand.body)
+                            .foregroundStyle(Brand.machineDown)
+                            .fixedSize(horizontal: false, vertical: true)
+                    } else if let transcript {
+                        ScrollView {
+                            Text(transcript)
+                                .font(Brand.mono)
+                                .foregroundStyle(.primary)
+                                .textSelection(.enabled)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(6)
+                        }
+                        // Tall enough to read a reply in, short enough that a
+                        // panel of several rows is still a panel.
+                        .frame(maxHeight: 220)
+                        .background(
+                            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                .fill(Color.primary.opacity(0.05))
+                        )
+                        // A read is a snapshot, not a feed: herdr has no
+                        // output subscription, so this is what the pane held
+                        // when it was asked. Saying so beats a view that looks
+                        // live and is not.
+                        Text("Read when opened · close and reopen to refresh")
+                            .font(Brand.sectionLabel)
+                            .foregroundStyle(Brand.secondaryText)
+                    }
+                }
+            }
+            .padding(.top, 2)
+        }
+    }
+
+    private func toggleTranscript() {
+        if showsTranscript {
+            showsTranscript = false
+            // Dropped rather than kept: reopening should show what the pane
+            // holds now, and a cached copy of a finished run is the one thing
+            // that would look current and not be.
+            transcript = nil
+            transcriptFailure = nil
+            return
+        }
+
+        showsTranscript = true
+        isLoadingTranscript = true
+        transcriptFailure = nil
+        Task {
+            do {
+                let text = try await fleet.transcript(for: agent.ref)
+                transcript = text
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+            } catch {
+                transcriptFailure = "Could not read this pane: \(error.localizedDescription)"
+            }
+            isLoadingTranscript = false
+        }
+    }
+
     @ViewBuilder private var actions: some View {
         let available = agent.actions
 
@@ -402,7 +511,9 @@ private struct AgentRow: View {
                     ActionButton(title: "Reply", tint: Brand.accent) { open(.reply) }
                 }
                 if available.canNudge {
-                    ActionButton(title: "Nudge", tint: Brand.secondaryText) { open(.nudge) }
+                    ActionButton(title: Brand.promptAction(for: agent.state), tint: Brand.secondaryText) {
+                        open(.nudge)
+                    }
                 }
                 if available.canReveal {
                     // The row's one dependable action. Approve is missing on
@@ -450,7 +561,7 @@ private struct AgentRow: View {
                         .fixedSize(horizontal: false, vertical: true)
                 } else {
                     HStack(spacing: 6) {
-                        TextField(kind.placeholder, text: $compose)
+                        TextField(placeholder(for: kind), text: $compose)
                             .textFieldStyle(.roundedBorder)
                             .font(Brand.body)
                             .onSubmit { stageCompose() }

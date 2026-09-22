@@ -178,6 +178,25 @@ public actor MachineSession {
         }
     }
 
+    /// The pane's recent output, verbatim, for a reader rather than the
+    /// classifier.
+    ///
+    /// Read on demand instead of carried on every ``Agent``: the steady-state
+    /// refresh already reads 60 wrapped lines per stopped pane to classify it,
+    /// and widening that to something worth reading would multiply the cost of
+    /// every poll — on a tunnelled machine, per pane, forever — to populate a
+    /// view almost no row is showing.
+    public func transcript(for agentId: AgentID, lines: Int = 200) async throws -> String {
+        guard let client else { throw InterventionError.agentGone }
+        let text = try await client.readPane(
+            paneId: agentId.raw, lines: lines, source: .recentUnwrapped
+        )
+        guard let text, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw InterventionError.agentGone
+        }
+        return text
+    }
+
     // MARK: - Interventions
 
     /// Do something to one agent on this machine, or refuse and say why.

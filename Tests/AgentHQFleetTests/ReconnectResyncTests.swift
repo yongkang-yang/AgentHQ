@@ -42,7 +42,7 @@ private actor ReconnectClient: HerdrClient {
     }
 
     nonisolated func events() -> AsyncStream<HerdrEvent> { stream }
-    func readPane(paneId: String, lines: Int) async throws -> String? { nil }
+    func readPane(paneId: String, lines: Int, source: PaneReadSource) async throws -> String? { nil }
     func agents() async throws -> [HerdrAgentInfo] {
         [HerdrAgentInfo(paneId: "w:p1", agent: "pi", agentStatus: status, stateChangeSeq: 1)]
     }

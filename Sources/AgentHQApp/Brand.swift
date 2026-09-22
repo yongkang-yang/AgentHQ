@@ -122,6 +122,22 @@ enum Brand {
     /// That rules out the detailed symbols that read fine in the panel —
     /// `xmark.diamond.fill` and `circle.fill` both collapsed into "a blob" at
     /// badge size, which is the whole reason this list changed.
+    /// What the button that sends `agent.prompt` should call itself.
+    ///
+    /// One herdr call, two different acts. On a working agent it interrupts a
+    /// train of thought with a correction — a nudge. On a stopped one it is
+    /// simply the next thing said, and calling *that* a nudge reads as "hurry
+    /// up": the most common way to answer a finished run was labelled as
+    /// pestering it, which is most of why the button looked useless.
+    static func promptAction(for state: AgentState) -> String {
+        state == .working ? "Nudge" : "Continue"
+    }
+
+    /// The hint in the box that button opens.
+    static func promptPlaceholder(for state: AgentState) -> String {
+        state == .working ? "Tell it what to do" : "Say what happens next"
+    }
+
     static func symbol(for state: AgentState) -> String {
         switch state {
         // An X, not an exclamation: the badge has to separate "this agent

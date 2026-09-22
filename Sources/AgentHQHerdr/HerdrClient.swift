@@ -161,6 +161,21 @@ public enum HerdrEvent: Sendable, Equatable {
 /// (Shepherd keeps two persistent sockets and serializes requests on one of
 /// them, to stop an event read-loop racing requests on a shared fd. That
 /// answers a protocol-17 problem; protocol 22 has no shared fd to race on.)
+/// Which of herdr's views of a pane to read.
+///
+/// `recent` is the scrollback tail as the terminal laid it out — wrapped to
+/// the pane's width, which is what the classifier wants, since its rules are
+/// written against lines as they appear. `recentUnwrapped` gives the logical
+/// lines instead, which is what a reader wants: the panel is not the same
+/// width as the pane, and re-wrapping an already-wrapped line leaves ragged
+/// half-lines down the view.
+public enum PaneReadSource: String, Sendable {
+    case visible
+    case recent
+    case recentUnwrapped = "recent_unwrapped"
+    case detection
+}
+
 public protocol HerdrClient: Sendable {
     /// herdr's handshake, for the version and protocol it speaks.
     func handshake() async throws -> (version: String, protocolVersion: Int)
@@ -171,11 +186,10 @@ public protocol HerdrClient: Sendable {
     func snapshot() async throws -> HerdrSnapshot
     func events() -> AsyncStream<HerdrEvent>
 
-    /// The tail of one pane's recent output, used to classify what it is
-    /// waiting on. Returns nil when herdr has nothing to give rather than
-    /// throwing — an unreadable pane is a pane we classify from status alone,
-    /// not a failure worth surfacing.
-    func readPane(paneId: String, lines: Int) async throws -> String?
+    /// The tail of one pane's output. Returns nil when herdr has nothing to
+    /// give rather than throwing — an unreadable pane is a pane we classify
+    /// from status alone, not a failure worth surfacing.
+    func readPane(paneId: String, lines: Int, source: PaneReadSource) async throws -> String?
 
     /// Every agent herdr currently sees, with its state-change stamp. One
     /// round trip for the whole machine.
@@ -197,3 +211,10 @@ public protocol HerdrClient: Sendable {
     func focusPane(paneId: String) async throws
 }
 
+public extension HerdrClient {
+    /// The classifier's read: the wrapped tail, which is the shape its rules
+    /// were written against.
+    func readPane(paneId: String, lines: Int) async throws -> String? {
+        try await readPane(paneId: paneId, lines: lines, source: .recent)
+    }
+}
