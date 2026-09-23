@@ -46,14 +46,24 @@ cat > "$APP_DIR/Contents/Info.plist" <<PLIST
 PLIST
 
 echo "==> Signing"
-# A Developer ID if one is available, ad-hoc otherwise. Ad-hoc is fine on the
-# machine that built it; Gatekeeper will object on any other Mac.
+# A Developer ID if one is available, then an Apple Development certificate,
+# ad-hoc otherwise. Ad-hoc is fine on the machine that built it, but its
+# signature changes every build, so macOS privacy grants reset each time;
+# Gatekeeper will object to anything but Developer ID on any other Mac.
+# Apple Development is matched by SHA-1 hash because two certificates with
+# the same common name make codesign refuse an ambiguous match.
 IDENTITY="$(security find-identity -v -p codesigning 2>/dev/null \
     | grep "Developer ID Application" | head -1 | sed -E 's/.*"(.+)"/\1/' || true)"
+DEV_IDENTITY="$(security find-identity -v -p codesigning 2>/dev/null \
+    | awk '/Apple Development/ {print $2; exit}' || true)"
 if [ -n "$IDENTITY" ]; then
     codesign --force --options runtime --timestamp \
         --entitlements Resources/AgentHQ.entitlements --sign "$IDENTITY" "$APP_DIR"
     echo "    signed with: $IDENTITY"
+elif [ -n "$DEV_IDENTITY" ]; then
+    codesign --force --options runtime \
+        --entitlements Resources/AgentHQ.entitlements --sign "$DEV_IDENTITY" "$APP_DIR"
+    echo "    signed with Apple Development: $DEV_IDENTITY"
 else
     codesign --force --entitlements Resources/AgentHQ.entitlements --sign - "$APP_DIR"
     echo "    ad-hoc signed (no Developer ID found)"
