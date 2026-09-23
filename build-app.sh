@@ -4,6 +4,17 @@ set -euo pipefail
 
 cd "$(dirname "$0")"
 
+# By default the build is installed over /Applications/AgentHQ.app, because
+# that is the copy the user launches: a bundle left only in the repo meant the
+# running app silently stayed older than every fix. --no-install skips it.
+INSTALL=1
+for arg in "$@"; do
+    case "$arg" in
+        --no-install) INSTALL=0 ;;
+        *) echo "usage: $0 [--no-install]" >&2; exit 2 ;;
+    esac
+done
+
 APP_NAME="AgentHQ"
 APP_DIR="${APP_NAME}.app"
 VERSION="0.1.0"
@@ -71,5 +82,37 @@ fi
 
 echo
 echo "Built $APP_DIR"
-echo "  run:  open $APP_DIR"
-echo "  quit: osascript -e 'quit app \"$APP_NAME\"'  (or the panel's Quit item)"
+
+if [ "$INSTALL" = 0 ]; then
+    echo "  run:  open $APP_DIR"
+    echo "  quit: osascript -e 'quit app \"$APP_NAME\"'  (or the panel's Quit item)"
+    exit 0
+fi
+
+INSTALL_DIR="/Applications/$APP_DIR"
+echo "==> Installing to $INSTALL_DIR"
+
+# Only one copy may run: TunnelReaper in the one starting up tears down the
+# other's tunnels. So quit whichever copy is running, wait for it to exit,
+# and relaunch the installed one only if something was running before.
+WAS_RUNNING=0
+if pgrep -xq "$APP_NAME"; then
+    WAS_RUNNING=1
+    osascript -e "quit app id \"dev.yongkang.agenthq\"" >/dev/null 2>&1 || true
+    for _ in $(seq 50); do
+        pgrep -xq "$APP_NAME" || break
+        sleep 0.1
+    done
+    pgrep -xq "$APP_NAME" && { echo "$APP_NAME did not quit; not installing" >&2; exit 1; }
+fi
+
+rm -rf "$INSTALL_DIR"
+ditto "$APP_DIR" "$INSTALL_DIR"
+echo "    installed $INSTALL_DIR"
+
+if [ "$WAS_RUNNING" = 1 ]; then
+    open "$INSTALL_DIR"
+    echo "    relaunched"
+else
+    echo "  run:  open $INSTALL_DIR"
+fi

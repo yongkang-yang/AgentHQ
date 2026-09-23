@@ -22,7 +22,9 @@ Tests live in `Tests/<Target>Tests/`.
 - `swift build` — compile all targets
 - `swift test` — run the Swift Testing suite
 - `swift run AgentHQApp` — launch the menu-bar app in development
-- `./build-app.sh` — rebuild `AgentHQ.app`, the installed menu-bar bundle
+- `./build-app.sh` — rebuild `AgentHQ.app` and install it over
+  `/Applications/AgentHQ.app`, restarting it if it was running
+  (`--no-install` builds the repo copy only)
 
 **`swift build` does not update `AgentHQ.app`.** The two are separate
 binaries: `swift build` writes a debug build under `.build/`, and the bundle
@@ -33,12 +35,9 @@ identical either way. It has already cost one round of "the fix doesn't work",
 where the binary under test was hours older than the fix.
 
 So when a change is to be checked in the running app rather than in tests, run
-`./build-app.sh` and restart it:
-
-```sh
-./build-app.sh
-osascript -e 'quit app "AgentHQ"' && open AgentHQ.app
-```
+`./build-app.sh`. It installs over `/Applications/AgentHQ.app` — the copy the
+user launches — and restarts it. It used to stop at the repo copy, and the
+`/Applications` one went on running a build from before the fix.
 
 `swift run AgentHQApp` is the other way to see a change, and it does use the
 fresh build — but it runs a second menu bar item alongside the installed one,

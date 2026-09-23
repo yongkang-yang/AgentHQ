@@ -132,11 +132,13 @@ than a setting.
 swift build
 swift test
 swift run AgentHQApp   # development
-./build-app.sh         # AgentHQ.app, the installed menu-bar bundle
+./build-app.sh         # build AgentHQ.app and install it in /Applications
 ```
 
 `swift build` does not update `AgentHQ.app` — the bundle carries its own
-release build, and only `build-app.sh` refreshes it.
+release build, and only `build-app.sh` refreshes it. It also installs the
+bundle over `/Applications/AgentHQ.app` and restarts it if it was running;
+pass `--no-install` to build the repo copy only.
 
 ## Not in scope
 
