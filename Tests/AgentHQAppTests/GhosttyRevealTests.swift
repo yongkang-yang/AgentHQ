@@ -38,7 +38,32 @@ struct GhosttyRevealTests {
     @MainActor
     func remoteCommandQuotesArguments() throws {
         let command = try GhosttyReveal.command(binary: "/tmp/my herdr", for: remoteMachine())
-        #expect(command == "'/tmp/my herdr' --remote 'wsl; echo unwanted' --session 'night'\\''s work'")
+        #expect(command.hasSuffix(
+            " '/tmp/my herdr' --remote 'wsl; echo unwanted' --session 'night'\\''s work'"
+        ))
+    }
+
+    @Test("a Ghostty launched from inside a herdr pane does not pass that pane's variables on")
+    @MainActor
+    func surfaceCommandDropsInheritedHerdrVariables() throws {
+        let command = try GhosttyReveal.command(binary: "/usr/bin/env", for: localMachine())
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/bash")
+        process.arguments = ["--noprofile", "--norc", "-c", "exec -l \(command)"]
+        var environment = ProcessInfo.processInfo.environment
+        for name in GhosttyReveal.inheritedHerdrVariables {
+            environment[name] = "inherited"
+        }
+        process.environment = environment
+        let output = Pipe()
+        process.standardOutput = output
+        try process.run()
+        process.waitUntilExit()
+
+        let printed = String(data: output.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+        #expect(process.terminationStatus == 0)
+        #expect(printed.contains("PATH="))
+        #expect(!printed.contains("HERDR_"))
     }
 
     @Test("Ghostty's macOS exec wrapper can execute the generated command")

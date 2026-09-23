@@ -120,10 +120,25 @@ enum GhosttyReveal {
         return try command(binary: binary, for: machine)
     }
 
+    /// Variables herdr exports into every pane. A Ghostty launched from inside
+    /// a pane (`open -a Ghostty` typed there) inherits them and hands them to
+    /// every surface it opens, and herdr refuses to start under `HERDR_ENV`
+    /// with "nested herdr is disabled". The rest name a pane and socket that
+    /// belong to whichever client the user typed in, not the one opening here.
+    static let inheritedHerdrVariables = [
+        "HERDR_ENV", "HERDR_BIN_PATH", "HERDR_SOCKET_PATH",
+        "HERDR_WORKSPACE_ID", "HERDR_TAB_ID", "HERDR_PANE_ID",
+    ]
+
     static func command(binary: String, for machine: Machine) throws -> String {
         // Ghostty's macOS surface runner prepends `exec -l` itself. A `shell:`
-        // prefix or another `exec` would be interpreted as the program name.
-        var command = try shellArgument(binary)
+        // prefix or another `exec` would be interpreted as the program name;
+        // `env` is a program, so it runs under that `exec` like herdr would.
+        var command = "/usr/bin/env"
+        for name in inheritedHerdrVariables {
+            command += " -u \(name)"
+        }
+        command += " \(try shellArgument(binary))"
         if case .ssh(let destination, _, let session, _) = machine.transport {
             command += " --remote \(try shellArgument(destination))"
             if session != "default" && !session.isEmpty {
