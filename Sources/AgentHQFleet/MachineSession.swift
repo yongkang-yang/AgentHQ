@@ -80,6 +80,19 @@ public actor MachineSession {
     /// transition out of `working` is something this session watched happen.
     private var completedUnseen: Set<AgentID> = []
 
+    /// herdr `done`s the user has already looked at, by the stamp they had.
+    ///
+    /// herdr clears `done` only when one of its own clients focuses the pane,
+    /// so with Ghostty closed a finished row stayed finished however long it
+    /// had been watched in the console. `pane.focus` would clear it but also
+    /// pull an open Ghostty onto that pane. So this is AgentHQ keeping its own
+    /// viewed completions, as herdr's docs expect each client to.
+    ///
+    /// Keyed by `state_change_seq`, which is unchanged by the `done`/`idle`
+    /// flip (invariant 9) and always moves before the next completion, since
+    /// one cannot happen without a turn of `working` first.
+    private var viewedDone: [AgentID: UInt64] = [:]
+
     public init(
         machine: Machine,
         makeClient: @escaping ClientFactory = { LiveHerdrClient(socketPath: $0) },
@@ -326,6 +339,15 @@ public actor MachineSession {
             } else if agent.state != .idle, agent.state != .finished {
                 completedUnseen.remove(agent.ref.agent)
             }
+            if agent.state != .idle, agent.state != .finished {
+                viewedDone[agent.ref.agent] = nil
+            }
+            if agent.state == .finished, let seq = agent.stateSeq,
+               viewedDone[agent.ref.agent] == seq {
+                var seen = agent
+                seen.state = .idle
+                return seen
+            }
             guard agent.state == .idle, completedUnseen.contains(agent.ref.agent) else {
                 return agent
             }
@@ -343,6 +365,18 @@ public actor MachineSession {
     /// herdr never cleared it.
     private func markSeen(_ agentId: AgentID) {
         completedUnseen.remove(agentId)
+        if let agent = agents.first(where: { $0.ref.agent == agentId }),
+           agent.state == .finished, let seq = agent.stateSeq {
+            viewedDone[agentId] = seq
+        }
+    }
+
+    /// The user has the agent in front of them in the console: its completion
+    /// is seen. Resynced at once so the row leaves Completed now, not at the
+    /// next refresh.
+    public func markViewed(_ agentId: AgentID) async {
+        markSeen(agentId)
+        try? await resync()
     }
 
     /// Carry dwell forward across refreshes.

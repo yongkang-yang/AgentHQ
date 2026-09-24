@@ -167,7 +167,15 @@ design discussion, not a refactor.
 
    Clearing it is then AgentHQ's job too, since herdr will go on saying
    `idle` either way: any intervention on the row calls `markSeen`, and
-   starting a new turn drops it.
+   starting a new turn drops it. So does a console window showing the row.
+
+   The same goes for herdr's own `done`, which only a herdr client focusing
+   the pane clears — with Ghostty closed, nothing does. `pane.focus` would,
+   but it also drags an open Ghostty onto that pane. So `markSeen` records
+   the `state_change_seq` of a finished row in `viewedDone`, and a `done`
+   still carrying that stamp reads as `idle`. The stamp is safe to key on:
+   the `done` → `idle` flip leaves it unchanged, and no new completion can
+   arrive without a turn of `working` moving it first.
 
 10. **Answering a prompt goes through `pane.send_keys`, never `agent.prompt`.**
    `agent.prompt` takes `target`, not `pane_id` — a `pane_id` is rejected with

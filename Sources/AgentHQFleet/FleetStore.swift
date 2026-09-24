@@ -186,6 +186,13 @@ public final class FleetStore {
         await refresh()
     }
 
+    /// The console is showing this agent, so a finished run is seen.
+    public func markViewed(_ ref: AgentRef) async {
+        guard let session = sessions[ref.machine] else { return }
+        await session.markViewed(ref.agent)
+        await refresh()
+    }
+
     /// Page the agent's own view. See `MachineSession.page(_:in:)`.
     public func page(_ direction: PageDirection, in ref: AgentRef) async throws {
         guard let session = sessions[ref.machine] else { throw InterventionError.agentGone }

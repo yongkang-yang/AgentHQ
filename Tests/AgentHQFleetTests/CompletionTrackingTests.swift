@@ -134,3 +134,65 @@ struct CompletionTrackingTests {
         await session.stop()
     }
 }
+
+/// herdr clears `done` only when one of its own clients focuses the pane, so
+/// with Ghostty closed a finished row stayed finished however long the user
+/// had watched it in the console.
+@Suite("Watching a finished run in the console clears it")
+struct ViewedCompletionTests {
+    private func session(_ client: StatusClient) -> MachineSession {
+        MachineSession(
+            machine: Machine(
+                id: MachineID("m"), displayName: "this mac",
+                transport: .local(socketPath: "/tmp/agenthq-viewed-test.sock")
+            ),
+            makeClient: { _ in client }
+        )
+    }
+
+    @Test("a herdr done that has been viewed reads as idle")
+    func viewedDoneIsIdle() async throws {
+        let client = StatusClient(status: "done")
+        let session = session(client)
+        await session.start()
+        #expect(await session.view().agents.first?.state == .finished)
+
+        await session.markViewed(AgentID("w:p1"))
+        #expect(await session.view().agents.first?.state == .idle)
+        // And stays so across refreshes: herdr goes on saying done.
+        try await session.resync()
+        #expect(await session.view().agents.first?.state == .idle)
+        await session.stop()
+    }
+
+    @Test("a completion this session watched is cleared by viewing too")
+    func viewedWatchedCompletionIsIdle() async throws {
+        let client = StatusClient(status: "working")
+        let session = session(client)
+        await session.start()
+        await client.set("idle")
+        try await session.resync()
+        #expect(await session.view().agents.first?.state == .finished)
+
+        await session.markViewed(AgentID("w:p1"))
+        #expect(await session.view().agents.first?.state == .idle)
+        await session.stop()
+    }
+
+    /// The record is keyed by the stamp, and a new completion cannot arrive
+    /// without a turn of work moving it.
+    @Test("the next run's completion is not swallowed by the last one's view")
+    func nextCompletionShows() async throws {
+        let client = StatusClient(status: "done")
+        let session = session(client)
+        await session.start()
+        await session.markViewed(AgentID("w:p1"))
+
+        await client.set("working")
+        try await session.resync()
+        await client.set("done")
+        try await session.resync()
+        #expect(await session.view().agents.first?.state == .finished)
+        await session.stop()
+    }
+}

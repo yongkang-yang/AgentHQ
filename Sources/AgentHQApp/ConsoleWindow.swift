@@ -76,6 +76,11 @@ private struct ConsoleView: View {
     @State private var input = ""
     @State private var isSending = false
     @State private var isFollowing = true
+    /// Output that arrived while scrolled up, held back until the reader
+    /// returns to the bottom. Swapping it in underneath them shifted the page
+    /// every refresh: the 400-line window slides as lines arrive, and a
+    /// status line changing length re-wraps everything below it.
+    @State private var pending: String?
     @FocusState private var inputFocused: Bool
 
     /// A read is one request on one connection (invariant 5), so the mirror
@@ -103,11 +108,22 @@ private struct ConsoleView: View {
                 }
                 .followsBottom($isFollowing)
                 .onChange(of: screen) {
-                    // Only while parked at the bottom. Scrolled up to read,
-                    // a jump every refresh would take the page away.
                     if isFollowing { proxy.scrollTo("screen", anchor: .bottom) }
                 }
+                .onChange(of: isFollowing) {
+                    // Back at the bottom: take whatever arrived meanwhile.
+                    if isFollowing, let pending { screen = pending; self.pending = nil }
+                }
                 .onAppear { proxy.scrollTo("screen", anchor: .bottom) }
+                .overlay(alignment: .bottomTrailing) {
+                    if pending != nil {
+                        ActionButton(title: "New output ↓", tint: Brand.accent) {
+                            isFollowing = true
+                            proxy.scrollTo("screen", anchor: .bottom)
+                        }
+                        .padding(10)
+                    }
+                }
             }
             .background(
                 RoundedRectangle(cornerRadius: 8, style: .continuous)
@@ -179,6 +195,9 @@ private struct ConsoleView: View {
 
     private func poll() async {
         while !Task.isCancelled {
+            // A completion shown in an open console has been seen, whether it
+            // was there when the window opened or landed while it was open.
+            if agent?.state == .finished { await fleet.markViewed(ref) }
             await reload()
             try? await Task.sleep(for: Self.pollInterval)
         }
@@ -188,7 +207,12 @@ private struct ConsoleView: View {
         do {
             let text = try await fleet.screen(for: ref)
             let condensed = Self.condense(text)
-            if condensed != screen { screen = condensed }
+            if isFollowing {
+                if condensed != screen { screen = condensed }
+                pending = nil
+            } else if condensed != screen {
+                pending = condensed
+            }
             readFailure = nil
         } catch let error as InterventionError {
             readFailure = error.summary
@@ -253,6 +277,8 @@ private struct ConsoleView: View {
             }
             isSending = false
             inputFocused = true
+            // Having acted, the reader wants to see what it did.
+            isFollowing = true
             await reload()
         }
     }
@@ -263,14 +289,36 @@ private extension View {
     /// there is no scroll geometry to read, and the console always follows.
     @ViewBuilder func followsBottom(_ isFollowing: Binding<Bool>) -> some View {
         if #available(macOS 15, *) {
-            onScrollGeometryChange(for: Bool.self) { geometry in
-                geometry.contentOffset.y + geometry.containerSize.height
-                    >= geometry.contentSize.height - 24
-            } action: { _, atBottom in
-                isFollowing.wrappedValue = atBottom
-            }
+            modifier(BottomFollowing(isFollowing: isFollowing))
         } else {
             self
         }
+    }
+}
+
+/// Following stops only when the reader scrolls away, never because content
+/// grew: in the instant before the scroll to the new bottom lands, the
+/// geometry reads as not at the bottom, and treating that as the reader
+/// leaving froze the console at random.
+@available(macOS 15, *)
+private struct BottomFollowing: ViewModifier {
+    @Binding var isFollowing: Bool
+    @State private var isScrolling = false
+
+    func body(content: Content) -> some View {
+        content
+            .onScrollPhaseChange { _, phase in
+                isScrolling = phase != .idle
+            }
+            .onScrollGeometryChange(for: Bool.self) { geometry in
+                geometry.contentOffset.y + geometry.containerSize.height
+                    >= geometry.contentSize.height - 24
+            } action: { _, atBottom in
+                if atBottom {
+                    isFollowing = true
+                } else if isScrolling {
+                    isFollowing = false
+                }
+            }
     }
 }
