@@ -98,6 +98,15 @@ struct GhosttyRevealTests {
         #expect(needles.filter { $0 == "RainNext" }.count == 1)
     }
 
+    @Test("opening herdr with no agent to aim at still looks for the hostname")
+    @MainActor
+    func agentlessNeedlesAreHostnameOnly() {
+        let needles = GhosttyReveal.needles(
+            for: localMachine(), agent: nil, hostname: "Mac.home"
+        )
+        #expect(needles == ["Mac.home"])
+    }
+
     @Test("a remote reveal scans nothing and relies on its own window")
     @MainActor
     func remoteHasNoNeedles() {

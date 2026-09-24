@@ -38,13 +38,33 @@ enum GhosttyReveal {
     /// Focus an existing terminal when possible, or open a client for this
     /// machine. The returned text is suitable for the row's status line.
     static func present(machine: Machine, agent: Agent) throws -> String {
+        try present(machine: machine, needles: needles(for: machine, agent: agent))
+    }
+
+    /// Bring up a herdr client for a machine with no agent to aim at — the
+    /// panel's Open herdr button, for when there is nothing to Reveal yet.
+    ///
+    /// `isServing` is whether AgentHQ can currently reach that machine's
+    /// herdr. When it cannot, no surface on screen can be drawing it, so
+    /// neither a title match nor the remembered terminal is worth focusing:
+    /// the remembered one may be a shell left behind by a herdr that exited,
+    /// and focusing it would look like the click worked. Starting `herdr`
+    /// starts its server too, which is the point of the button.
+    static func open(machine: Machine, isServing: Bool) throws -> String {
+        guard isServing else {
+            return try present(machine: machine, needles: [], reuse: false)
+        }
+        return try present(machine: machine, needles: needles(for: machine, agent: nil))
+    }
+
+    private static func present(machine: Machine, needles: [String], reuse: Bool = true) throws -> String {
         let command = try herdrCommand(for: machine)
         let key = terminalKeyPrefix + machine.id.raw
-        let rememberedID = UserDefaults.standard.string(forKey: key)
+        let rememberedID = reuse ? UserDefaults.standard.string(forKey: key) : nil
         let source = try script(
             command: command,
             rememberedID: rememberedID,
-            needles: needles(for: machine, agent: agent),
+            needles: needles,
             // A local herdr is already drawn by whichever Ghostty surface the
             // user runs it in, so finding that surface beats one AgentHQ
             // opened. A remote machine is the reverse: the window AgentHQ
@@ -91,18 +111,20 @@ enum GhosttyReveal {
     /// A remote machine gets no needles at all. Any fragment generic enough to
     /// guess its window title would also match a local terminal, and focusing
     /// the wrong surface is worse than opening the right one.
+    ///
+    /// With no agent only the hostname is left, which is still the fragment
+    /// herdr's default title leads with.
     static func needles(
         for machine: Machine,
-        agent: Agent,
+        agent: Agent?,
         hostname: String = GhosttyReveal.localHostname()
     ) -> [String] {
         guard machine.transport.isLocal else { return [] }
 
-        let values = [
-            hostname,
-            agent.workspace,
-            (agent.directory as NSString).lastPathComponent,
-        ]
+        var values = [hostname]
+        if let agent {
+            values += [agent.workspace, (agent.directory as NSString).lastPathComponent]
+        }
 
         var seen = Set<String>()
         return values.filter { !$0.isEmpty && seen.insert($0).inserted }

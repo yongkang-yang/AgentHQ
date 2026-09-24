@@ -16,6 +16,8 @@ struct PanelView: View {
     @State private var now = Date()
     /// What the agent list measured itself to be. See the frame below.
     @State private var listHeight: CGFloat = 0
+    /// What the last Open herdr click did, until the next one.
+    @State private var openNote: OpenNote?
 
     static let minimumListHeight: CGFloat = 96
     static let maximumListHeight: CGFloat = 460
@@ -107,7 +109,7 @@ struct PanelView: View {
         }
     }
 
-    private var header: some View {
+    @ViewBuilder private var header: some View {
         HStack(spacing: 8) {
             Text("AgentHQ").font(Brand.title)
             Spacer()
@@ -121,10 +123,23 @@ struct PanelView: View {
                     .font(Brand.sectionLabel)
                     .foregroundStyle(Brand.secondaryText)
             }
+            if let local = fleet.snapshot.machines.first(where: { $0.machine.transport.isLocal }) {
+                OpenHerdrButton(view: local, fleet: fleet, note: $openNote)
+            }
         }
         .padding(.horizontal, 14)
         .padding(.top, 12)
-        .padding(.bottom, 4)
+        .padding(.bottom, openNote == nil ? 4 : 0)
+        // Under the header rather than in it: a failure here is a sentence
+        // (usually the Automation grant), and the header has no room for one.
+        if let openNote {
+            Text(openNote.text)
+                .font(Brand.sectionLabel)
+                .foregroundStyle(openNote.isFailure ? Brand.machineDown : Brand.secondaryText)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.horizontal, 14)
+                .padding(.bottom, 4)
+        }
     }
 
     private var empty: some View {
@@ -805,6 +820,56 @@ private struct AgentRow: View {
                 failure = String(describing: error)
             }
             isSending = false
+        }
+    }
+}
+
+/// What an Open herdr click reports back to the header.
+struct OpenNote: Equatable {
+    let text: String
+    let isFailure: Bool
+}
+
+/// Opens this Mac's herdr in Ghostty, whether or not anything is running.
+///
+/// Reveal needs a row, and a row needs an agent, so with an empty herd the
+/// panel offered no way into herdr at all. This is that way in: it focuses
+/// the surface already drawing herdr when AgentHQ can reach it, and otherwise
+/// opens a window running `herdr`, which starts the server as well.
+struct OpenHerdrButton: View {
+    let view: MachineView
+    let fleet: FleetStore
+    @Binding var note: OpenNote?
+
+    var body: some View {
+        ActionButton(
+            title: view.reachability.isConnected ? "Open herdr" : "Start herdr",
+            tint: Brand.revealAction
+        ) { open() }
+        .help(view.reachability.isConnected
+              ? "Show this Mac's herdr in Ghostty"
+              : "Start herdr on this Mac in a new Ghostty window")
+    }
+
+    private func open() {
+        let isServing = view.reachability.isConnected
+        do {
+            let result = try GhosttyReveal.open(machine: view.machine, isServing: isServing)
+            note = isServing ? nil : OpenNote(text: result, isFailure: false)
+            if !isServing { Self.retrySoon(view.machine.id, fleet: fleet) }
+        } catch {
+            note = OpenNote(text: error.localizedDescription, isFailure: true)
+        }
+    }
+
+    /// A freshly started herdr is picked up by the session's own retry, but
+    /// that backs off to ten seconds and more — long enough to read as the
+    /// button not having worked. Asking once, after herdr has had a moment to
+    /// bind its socket, turns that into about two.
+    private static func retrySoon(_ id: MachineID, fleet: FleetStore) {
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(2))
+            fleet.retry(id)
         }
     }
 }
