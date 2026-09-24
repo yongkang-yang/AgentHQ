@@ -126,6 +126,7 @@ struct PanelView: View {
             if let local = fleet.snapshot.machines.first(where: { $0.machine.transport.isLocal }) {
                 OpenHerdrButton(view: local, fleet: fleet, note: $openNote)
             }
+            SettingsMenu(notifier: notifier, fleet: fleet)
         }
         .padding(.horizontal, 14)
         .padding(.top, 12)
@@ -158,39 +159,6 @@ struct PanelView: View {
     private var footer: some View {
         VStack(alignment: .leading, spacing: 8) {
             MachineStrip(machines: fleet.snapshot.machines, fleet: fleet)
-
-            HStack(spacing: 12) {
-                Toggle("Notify", isOn: Binding(
-                    get: { notifier.isEnabled },
-                    set: { notifier.isEnabled = $0 }
-                ))
-                .toggleStyle(.switch)
-                .controlSize(.mini)
-                .font(Brand.body)
-                .help("Notify when an agent needs you, or a machine stops answering")
-
-                // Only while notifications are on at all, because on its own
-                // it controls nothing and reads as a second thing that is
-                // broken.
-                if notifier.isEnabled {
-                    Toggle("on finish", isOn: Binding(
-                        get: { notifier.announcesCompletions },
-                        set: {
-                            notifier.announcesCompletions = $0
-                            fleet.announcesCompletions = $0
-                        }
-                    ))
-                    .toggleStyle(.switch)
-                    .controlSize(.mini)
-                    .font(Brand.body)
-                    .help("Also notify when a run finishes, with what it said")
-                }
-                Spacer()
-                ActionButton(title: "Quit", tint: Brand.secondaryText) {
-                    NSApplication.shared.terminate(nil)
-                }
-                .keyboardShortcut("q")
-            }
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
@@ -821,6 +789,58 @@ private struct AgentRow: View {
             }
             isSending = false
         }
+    }
+}
+
+/// The panel's preferences and Quit, behind one gear.
+///
+/// They used to be a row of their own in the footer, which cost a line of
+/// the panel on every open for switches that are set once. The menu is a
+/// real `NSMenu`, not a view inside the panel, so it adds nothing that
+/// animates inside `MenuBarExtra` (invariant 12).
+private struct SettingsMenu: View {
+    let notifier: Notifier
+    let fleet: FleetStore
+
+    var body: some View {
+        Menu {
+            Toggle("Notify when an agent needs you", isOn: Binding(
+                get: { notifier.isEnabled },
+                set: { notifier.isEnabled = $0 }
+            ))
+            // Disabled rather than hidden while notifications are off: on
+            // its own it controls nothing, but a menu that changes shape
+            // reads as an item having gone missing.
+            Toggle("Also notify when a run finishes", isOn: Binding(
+                get: { notifier.announcesCompletions },
+                set: {
+                    notifier.announcesCompletions = $0
+                    fleet.announcesCompletions = $0
+                }
+            ))
+            .disabled(!notifier.isEnabled)
+            Divider()
+            Button("Quit AgentHQ") { NSApplication.shared.terminate(nil) }
+                .keyboardShortcut("q")
+        } label: {
+            Image(systemName: "gearshape")
+                .foregroundStyle(Brand.secondaryText)
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .help("Settings")
+        // A menu item's shortcut only answers while the menu is open, and
+        // ⌘Q with the panel up used to quit. Kept on a button that draws
+        // nothing so it still does — invisible by opacity, not `.hidden()`,
+        // which is not guaranteed to keep a shortcut registered.
+        .background(
+            Button("") { NSApplication.shared.terminate(nil) }
+                .keyboardShortcut("q")
+                .opacity(0)
+                .frame(width: 0, height: 0)
+                .allowsHitTesting(false)
+        )
     }
 }
 
