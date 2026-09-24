@@ -163,11 +163,11 @@ struct PanelView: View {
     }
 }
 
-/// Every machine as a glyph and its agent count: a Mac for this one, a
-/// terminal for the rest.
+/// Every machine as a glyph and its agent count, one glyph per machine —
+/// see ``MachineView/symbols(for:)``.
 ///
-/// A connected machine needs nothing more — which box it is shows in the
-/// tooltip and on every agent row. One that is not connected spends the room
+/// A connected machine needs nothing more: the glyph and the colour wash say
+/// which box, and the tooltip names it. One that is not connected spends the room
 /// the count saved: tinted, named, its state in a word, and Retry. "wsl
 /// unreachable", not a red dot, so the line alone says which box to look at.
 /// The verbatim reason is in the tooltip and the settings menu, which have
@@ -177,18 +177,19 @@ private struct MachineBar: View {
     let fleet: FleetStore
 
     var body: some View {
+        let symbols = MachineView.symbols(for: machines)
         HStack(spacing: 8) {
             ForEach(machines) { view in
-                item(view)
+                item(view, symbol: symbols[view.id] ?? "terminal")
             }
             Spacer(minLength: 0)
         }
     }
 
-    @ViewBuilder private func item(_ view: MachineView) -> some View {
+    @ViewBuilder private func item(_ view: MachineView, symbol: String) -> some View {
         let isTroubled = view.machine.isEnabled && !view.reachability.isConnected
         HStack(spacing: 4) {
-            Image(systemName: view.symbol)
+            Image(systemName: symbol)
                 .font(.system(size: 12))
                 .foregroundStyle(isTroubled ? view.dotColor : Brand.secondaryText)
             if isTroubled {
@@ -204,16 +205,6 @@ private struct MachineBar: View {
                         .buttonStyle(.link)
                 }
             } else {
-                // Named when remote: two terminals side by side are two
-                // identical glyphs, and hovering to tell them apart defeats a
-                // line meant to be read at a glance. This Mac is the only
-                // laptop, so it needs no name.
-                if view.machine.transport.isRemote {
-                    Text(view.machine.displayName)
-                        .font(Brand.mono)
-                        .foregroundStyle(.primary)
-                        .lineLimit(1)
-                }
                 // A disabled machine keeps its glyph, dimmed, with no count:
                 // it is not watched, so it has no count to report.
                 Text(view.machine.isEnabled ? "\(view.agents.count)" : "–")
@@ -233,11 +224,33 @@ private struct MachineBar: View {
 }
 
 extension MachineView {
-    /// This Mac as a Mac. SF Symbols has no Linux mark, and a remote machine
-    /// is reached through a shell whatever it runs, so the rest are a
-    /// terminal.
-    var symbol: String {
-        machine.transport.isLocal ? "laptopcomputer" : "terminal"
+    /// A glyph per machine, distinct within the bar, so two remote machines
+    /// are told apart without their names.
+    ///
+    /// This Mac is the laptop. A WSL machine is a PC, which is what it is
+    /// from here — SF Symbols has neither a Windows nor a Linux mark. The
+    /// rest take the next unused glyph in bar order, so no two share one
+    /// until the pool runs out.
+    static func symbols(for machines: [MachineView]) -> [MachineID: String] {
+        let pool = ["server.rack", "cloud", "desktopcomputer", "cpu", "externaldrive", "terminal"]
+        var result: [MachineID: String] = [:]
+        var next = 0
+        for view in machines {
+            if view.machine.transport.isLocal {
+                result[view.id] = "laptopcomputer"
+            } else if view.isWSL {
+                result[view.id] = "pc"
+            } else {
+                result[view.id] = pool[next % pool.count]
+                next += 1
+            }
+        }
+        return result
+    }
+
+    private var isWSL: Bool {
+        guard case .ssh(let destination, _, _, _) = machine.transport else { return false }
+        return [machine.displayName, destination].contains { $0.localizedCaseInsensitiveContains("wsl") }
     }
 
     /// A failure the user is being asked to look at. `reconnecting` is not
