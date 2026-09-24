@@ -91,10 +91,18 @@ struct PanelView: View {
                 }
             }
 
-            // Inset, as a Tahoe menu's separators are: a full-bleed rule cuts
-            // the glass in two instead of dividing what sits on it.
-            Divider().padding(.horizontal, 14)
-            footer
+            // Only while a machine is in trouble. The machines themselves
+            // live in the settings menu; this is what keeps a down one from
+            // hiding in there (invariant 2 cuts both ways: a down machine is
+            // not a dead agent, and it is not nothing either).
+            if !troubled.isEmpty {
+                // Inset, as a Tahoe menu's separators are: a full-bleed rule
+                // cuts the glass in two instead of dividing what sits on it.
+                Divider().padding(.horizontal, 14)
+                MachineTrouble(machines: troubled, fleet: fleet)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
+            }
         }
         .frame(width: 460)
         .onReceive(tick) { now = $0 }
@@ -154,92 +162,48 @@ struct PanelView: View {
         .padding(14)
     }
 
-    /// Machine-level state lives here, apart from the agents, because an
-    /// unreachable machine is a different problem from a stuck agent.
-    private var footer: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            MachineStrip(machines: fleet.snapshot.machines, fleet: fleet)
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
+    private var troubled: [MachineView] {
+        fleet.snapshot.machines.filter { $0.machine.isEnabled && !$0.reachability.isConnected }
     }
-
 }
 
-/// The machines, folded to one line until asked for.
+/// The machines that are not simply connected, named, with the one thing to
+/// do about them.
 ///
-/// Three machines as three always-open rows took more of the panel than the
-/// agents did, and the agents are what the panel is for. Folding them must not
-/// hide trouble, though (invariant 2 cuts both ways: a down machine is not a
-/// dead agent, and it is not nothing either), so the folded line carries a dot
-/// per machine in its own reachability colour and names any machine that is
-/// not simply connected.
-private struct MachineStrip: View {
+/// "build-box unreachable", not "1 unreachable", so the line alone says which
+/// box to look at. The verbatim reason is in the tooltip and in the settings
+/// menu, which have room for a sentence.
+private struct MachineTrouble: View {
     let machines: [MachineView]
     let fleet: FleetStore
 
-    /// Folded by default, and remembered: someone who keeps it open wants it
-    /// open next launch too.
-    @AppStorage("machineStripExpanded") private var isExpanded = false
-
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Button {
-                withAnimation(.easeOut(duration: 0.15)) { isExpanded.toggle() }
-            } label: {
+        VStack(alignment: .leading, spacing: 4) {
+            ForEach(machines) { view in
                 HStack(spacing: 6) {
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 8, weight: .bold))
-                        .rotationEffect(.degrees(isExpanded ? 90 : 0))
-                        .foregroundStyle(Brand.secondaryText)
-                        .frame(width: 8)
-                    HStack(spacing: 3) {
-                        ForEach(machines) { view in
-                            Circle()
-                                .fill(view.dotColor)
-                                .frame(width: 6, height: 6)
-                                .help(view.machine.displayName)
-                        }
-                    }
-                    Text(machines.count == 1 ? "1 machine" : "\(machines.count) machines")
+                    Circle()
+                        .fill(view.dotColor)
+                        .frame(width: 6, height: 6)
+                    MachineTag(name: view.machine.displayName, id: view.machine.id)
+                    Text(view.shortStatus)
                         .font(Brand.sectionLabel)
-                        .foregroundStyle(Brand.secondaryText)
-                    if let trouble {
-                        Text(trouble.text)
-                            .font(Brand.sectionLabel)
-                            .foregroundStyle(trouble.isDown ? Brand.machineDown : Brand.secondaryText)
-                            .lineLimit(1)
-                    }
+                        .foregroundStyle(view.isDown ? Brand.machineDown : Brand.secondaryText)
                     Spacer(minLength: 0)
+                    if view.canRetry {
+                        // Rather than waiting out a reconnect cycle while
+                        // looking at a machine you know is back.
+                        Button("Retry") { fleet.retry(view.machine.id) }
+                            .font(Brand.sectionLabel)
+                            .buttonStyle(.link)
+                    }
                 }
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .help(isExpanded ? "Hide machines" : "Show machines")
-
-            if isExpanded {
-                ForEach(machines) { view in
-                    MachineRow(view: view, fleet: fleet)
-                }
-                .padding(.leading, 14)
+                .help(view.statusText)
             }
         }
     }
-
-    /// The machines that are not simply connected, by name — "build-box
-    /// unreachable", not "1 unreachable", so the folded line is enough to know
-    /// which box to look at. The verbatim reason stays in the unfolded row.
-    private var trouble: (text: String, isDown: Bool)? {
-        let notConnected = machines.filter { !$0.reachability.isConnected }
-        guard !notConnected.isEmpty else { return nil }
-        let text = notConnected
-            .map { "\($0.machine.displayName) \($0.shortStatus)" }
-            .joined(separator: " · ")
-        return ("— " + text, notConnected.contains { $0.isDown })
-    }
 }
 
-private extension MachineView {
+extension MachineView {
     /// A failure the user is being asked to look at. `reconnecting` is not
     /// one — see ``MachineReachability/isTransient``.
     var isDown: Bool {
@@ -253,8 +217,8 @@ private extension MachineView {
         return Brand.secondaryText
     }
 
-    /// The one-word form for the folded line. Never the failure's reason,
-    /// which is a sentence and belongs in the row that has room for it.
+    /// The one-word form for a line with no room. Never the failure's reason,
+    /// which is a sentence — see ``statusText``.
     var shortStatus: String {
         switch reachability {
         case .connected:    return "connected"
@@ -264,82 +228,27 @@ private extension MachineView {
         case .unreachable:  return "unreachable"
         }
     }
-}
-
-/// One machine: whether it is answering, what it is running, and the two
-/// things the user can actually do about it.
-private struct MachineRow: View {
-    let view: MachineView
-    let fleet: FleetStore
-
-    var body: some View {
-        HStack(spacing: 6) {
-            Circle()
-                .fill(dotColor)
-                .frame(width: 6, height: 6)
-            MachineTag(name: view.machine.displayName, id: view.machine.id)
-            Text(statusText)
-                .font(Brand.sectionLabel)
-                .foregroundStyle(isDown ? Brand.machineDown : Brand.secondaryText)
-                .lineLimit(1)
-                .help(statusText)
-
-            if let version = view.herdrVersion, view.reachability.isConnected {
-                Text("herdr \(version)")
-                    .font(Brand.mono)
-                    .foregroundStyle(Brand.secondaryText)
-            }
-
-            Spacer()
-
-            if canRetry {
-                // Rather than waiting out a reconnect cycle while looking at
-                // a machine you know is back.
-                Button("Retry") { fleet.retry(view.machine.id) }
-                    .font(Brand.sectionLabel)
-                    .buttonStyle(.link)
-            }
-            Button(view.machine.isEnabled ? "Disable" : "Enable") {
-                fleet.setEnabled(!view.machine.isEnabled, for: view.machine.id)
-            }
-            .font(Brand.sectionLabel)
-            .buttonStyle(.link)
-            .help(view.machine.isEnabled
-                  ? "Stop watching this machine and close its tunnel"
-                  : "Watch this machine again")
-
-            Text("\(view.agents.count)")
-                .font(Brand.mono)
-                .foregroundStyle(Brand.secondaryText)
-                .frame(minWidth: 14, alignment: .trailing)
-        }
-    }
-
-    private var isDown: Bool { view.isDown }
-
-    /// Offered for a reconnect too, not just a failure. The supervisor now
-    /// backs off to half a minute between attempts, and the comment above
-    /// about not waiting out a cycle applies most to the state that says
-    /// "reconnecting (14)" — which is the one the button used to be missing
-    /// from. `connecting` is excluded because an attempt is already running.
-    private var canRetry: Bool {
-        switch view.reachability {
-        case .connected, .connecting, .disabled: return false
-        case .reconnecting, .unreachable:        return true
-        }
-    }
-
-    private var dotColor: Color { view.dotColor }
 
     /// Verbatim for a failure. "Unreachable" alone tells the user nothing they
     /// can act on; the reason names the host and what it refused.
-    private var statusText: String {
-        switch view.reachability {
+    var statusText: String {
+        switch reachability {
         case .connected:               return "connected"
         case .connecting:              return "connecting…"
         case .disabled:                return "disabled"
         case .reconnecting(let n):     return "reconnecting (\(n))"
         case .unreachable(let reason): return reason
+        }
+    }
+
+    /// Offered for a reconnect too, not just a failure. The supervisor backs
+    /// off to half a minute between attempts, and not waiting out a cycle
+    /// matters most to the state that says "reconnecting (14)". `connecting`
+    /// is excluded because an attempt is already running.
+    var canRetry: Bool {
+        switch reachability {
+        case .connected, .connecting, .disabled: return false
+        case .reconnecting, .unreachable:        return true
         }
     }
 }
@@ -804,6 +713,12 @@ private struct SettingsMenu: View {
 
     var body: some View {
         Menu {
+            Section("Machines") {
+                ForEach(fleet.snapshot.machines) { view in
+                    MachineMenu(view: view, fleet: fleet)
+                }
+            }
+            Divider()
             Toggle("Notify when an agent needs you", isOn: Binding(
                 get: { notifier.isEnabled },
                 set: { notifier.isEnabled = $0 }
@@ -841,6 +756,41 @@ private struct SettingsMenu: View {
                 .frame(width: 0, height: 0)
                 .allowsHitTesting(false)
         )
+    }
+}
+
+/// One machine as a submenu: its state in the title, what can be done about
+/// it inside.
+///
+/// A menu item cannot be coloured, so the state is a word, and the reason for
+/// a failure is shown whole as the submenu's first line — the tooltip it used
+/// to be in does not exist in a menu.
+private struct MachineMenu: View {
+    let view: MachineView
+    let fleet: FleetStore
+
+    var body: some View {
+        Menu(title) {
+            Text(view.statusText)
+            if let version = view.herdrVersion, view.reachability.isConnected {
+                Text("herdr \(version)")
+            }
+            Divider()
+            if view.canRetry {
+                Button("Retry") { fleet.retry(view.machine.id) }
+            }
+            Button(view.machine.isEnabled ? "Disable" : "Enable") {
+                fleet.setEnabled(!view.machine.isEnabled, for: view.machine.id)
+            }
+        }
+    }
+
+    private var title: String {
+        let agents = view.agents.count
+        let count = agents == 1 ? "1 agent" : "\(agents) agents"
+        return view.reachability.isConnected
+            ? "\(view.machine.displayName) — \(count)"
+            : "\(view.machine.displayName) — \(view.shortStatus)"
     }
 }
 
