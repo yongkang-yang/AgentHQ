@@ -264,9 +264,6 @@ public extension PromptAffordances {
     /// while something is actually waiting to be answered. Offering Approve on
     /// a working agent would send a `y` into a running turn.
     func actions(for state: AgentState, recentOutput: String?) -> AgentActions {
-        // `canNudge` is false for every blocked state because herdr rejects
-        // `agent.prompt` there — measured, not assumed: it answers
-        // `agent_blocked: agent is blocked and requires interactive input`.
         switch state {
         case .needsApproval, .needsInput:
             let keys = affordances(inRecentOutput: recentOutput)
@@ -274,21 +271,13 @@ public extension PromptAffordances {
                 approveKey: keys.approve,
                 denyKey: keys.deny,
                 canEnd: true,
-                canNudge: false,
-                canReveal: true,
-                // Only the open question takes words. An approval prompt's
-                // named keys are its answer, and typing at a highlighted-row
-                // menu goes into a filter or nowhere.
-                canReply: state == .needsInput
+                canReveal: true
             )
 
-        case .working:
-            return AgentActions(canEnd: true, canNudge: true, canReveal: true)
-
-        case .rateLimited, .ciFailed, .mergeConflict, .finished, .idle, .unknown:
-            // Stopped but alive. There is nothing to answer, and a new
-            // instruction is the useful thing to send.
-            return AgentActions(canEnd: true, canNudge: true, canReveal: true)
+        case .working, .rateLimited, .ciFailed, .mergeConflict, .finished, .idle, .unknown:
+            // Alive, with nothing to answer. Words for it go through the
+            // console, where the user can see what they are answering.
+            return AgentActions(canEnd: true, canReveal: true)
 
         case .crashed:
             // The process is gone. Every one of these would be sent into a

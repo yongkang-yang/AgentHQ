@@ -4,8 +4,9 @@ import Foundation
 
 /// Something the user can do to one agent from the panel.
 ///
-/// Deliberately not a general "send these keys" escape hatch. Every case here
-/// is one the panel can label truthfully, and a button whose label does not
+/// Deliberately not a general "send these keys" escape hatch — typing at an
+/// agent is the console's, where the user is looking at the live pane. Every
+/// case here is one the panel can label truthfully, and a button whose label does not
 /// match what the keystroke will do is worse than no button: the user believes
 /// they answered a prompt and walks away.
 public enum Intervention: Sendable, Equatable {
@@ -16,19 +17,6 @@ public enum Intervention: Sendable, Equatable {
     /// Decline it, pressing the key the prompt itself named.
     case deny
 
-    /// Hand the agent a new instruction while it is working.
-    case nudge(String)
-
-    /// Answer the question a blocked agent is asking, in words.
-    ///
-    /// Distinct from ``nudge`` and deliberately not sharing a button with it.
-    /// Nudge interrupts an agent that is working and travels `agent.prompt`;
-    /// reply answers one that is waiting, and cannot travel `agent.prompt` at
-    /// all — herdr refuses it on a blocked agent with `agent_blocked`. One
-    /// control doing both would send text down a path herdr rejects half the
-    /// time.
-    case reply(String)
-
     /// End the conversation: quit the agent, leaving its pane alive.
     ///
     /// The panel's only terminating action. An "interrupt the current turn"
@@ -37,7 +25,7 @@ public enum Intervention: Sendable, Equatable {
     /// panel that is not where you are watching from adds a second button
     /// whose difference from this one has to be explained every time.
     ///
-    /// The pane and its scrollback survive, which is what keeps Show output
+    /// The pane and its scrollback survive, which is what keeps the console
     /// readable afterwards — the alternative, `pane.close`, would take the
     /// record of what the agent did with it.
     ///
@@ -84,12 +72,6 @@ public struct AgentActions: Sendable, Equatable {
     /// direction that cannot do something the user did not ask for.
     public var denyKey: String?
 
-    /// Submitting a prompt. False while the agent is blocked, because herdr
-    /// refuses it there — `agent.prompt` on a blocked agent comes back
-    /// `agent_blocked: requires interactive input`. The button is hidden
-    /// rather than shown and then failing.
-    public var canNudge: Bool
-
     /// Focusing the pane. True whenever there is a pane to focus, which is
     /// every live agent — so this is the row's one dependable action.
     public var canReveal: Bool
@@ -98,29 +80,16 @@ public struct AgentActions: Sendable, Equatable {
     /// ending a conversation does not depend on what it is currently doing.
     public var canEnd: Bool
 
-    /// Typing an answer. True only for ``AgentState/needsInput``.
-    ///
-    /// Not offered on `needsApproval`, even though that agent is equally
-    /// blocked. An approval prompt is a bounded choice — often a
-    /// highlighted-row menu, where typed text goes into a filter or nowhere —
-    /// and its named keys *are* the answer. A Reply box there would be a
-    /// control that looks like it works and usually does not.
-    public var canReply: Bool
-
     public init(
         approveKey: String? = nil,
         denyKey: String? = nil,
         canEnd: Bool = false,
-        canNudge: Bool = false,
-        canReveal: Bool = false,
-        canReply: Bool = false
+        canReveal: Bool = false
     ) {
         self.approveKey = approveKey
         self.denyKey = denyKey
         self.canEnd = canEnd
-        self.canNudge = canNudge
         self.canReveal = canReveal
-        self.canReply = canReply
     }
 
     public static let none = AgentActions()
@@ -130,9 +99,7 @@ public struct AgentActions: Sendable, Equatable {
         case .approve:   return approveKey != nil
         case .deny:      return denyKey != nil
         case .end:       return canEnd
-        case .nudge:     return canNudge
         case .reveal:    return canReveal
-        case .reply:     return canReply
         }
     }
 }

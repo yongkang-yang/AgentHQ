@@ -172,12 +172,26 @@ public final class FleetStore {
         await refresh()
     }
 
-    /// One agent's recent output, verbatim, fetched when a row asks to show
-    /// it. Routed by machine for the same reason interventions are: a pane id
-    /// is only unique within its own herd.
-    public func transcript(for ref: AgentRef, lines: Int = 200) async throws -> String {
+    /// One pane's screen as it stands, for the console window.
+    public func screen(for ref: AgentRef) async throws -> String {
         guard let session = sessions[ref.machine] else { throw InterventionError.agentGone }
-        return try await session.transcript(for: ref.agent, lines: lines)
+        return try await session.screen(for: ref.agent)
+    }
+
+    /// Press keys in one pane from the console window. Routed by machine for
+    /// the same reason interventions are.
+    public func press(_ keys: [String], in ref: AgentRef) async throws {
+        guard let session = sessions[ref.machine] else { throw InterventionError.agentGone }
+        try await session.press(keys, in: ref.agent)
+        await refresh()
+    }
+
+    /// Submit a line typed into the console window. See
+    /// `MachineSession.submit(_:to:)` for which herdr call it takes.
+    public func submit(_ text: String, to ref: AgentRef) async throws {
+        guard let session = sessions[ref.machine] else { throw InterventionError.agentGone }
+        try await session.submit(text, to: ref.agent)
+        await refresh()
     }
 
     /// Rebuild the snapshot from every session.

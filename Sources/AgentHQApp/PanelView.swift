@@ -369,26 +369,11 @@ private struct AgentRow: View {
     let fleet: FleetStore
 
     @State private var isSending = false
-    @State private var compose = ""
-    /// Text staged by Send and awaiting Confirm.
-    @State private var pendingCompose: String?
     /// Whether End is staged and waiting to be confirmed. Never sends on its
     /// own — see the confirmation row.
     @State private var pendingEnd = false
-    /// Which text action the box is currently for. Nudge and reply travel
-    /// different herdr calls and are valid in opposite states, so the box has
-    /// to remember which one opened it.
-    @State private var composing: ComposeKind?
     @State private var revealNote: String?
     @State private var failure: String?
-
-    /// The pane's recent output, once the user has asked to see it. Fetched
-    /// on demand rather than carried on every refresh — see
-    /// `MachineSession.transcript(for:lines:)`.
-    @State private var transcript: String?
-    @State private var isLoadingTranscript = false
-    @State private var transcriptFailure: String?
-    @State private var showsTranscript = false
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
@@ -460,8 +445,6 @@ private struct AgentRow: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
 
-                outputDisclosure
-
                 actions
             }
         }
@@ -482,109 +465,11 @@ private struct AgentRow: View {
     /// say `y` asks the user to trust that AgentHQ read the prompt correctly,
     /// and this is the one place in the product where a wrong reading is
     /// destructive rather than merely visible.
-    private func placeholder(for kind: ComposeKind) -> String {
-        switch kind {
-        case .reply: return kind.placeholder
-        case .nudge: return Brand.promptPlaceholder(for: agent.state)
-        }
-    }
-
-    // MARK: - Output
-
-    /// "What did it actually say?" — the question the excerpt above can only
-    /// ever half answer.
-    ///
-    /// The excerpt is condensed: whitespace collapsed, every line cut at 117
-    /// characters, six lines at most. That is right for a prompt the user has
-    /// to act on and wrong for a result they have to read. This shows what the
-    /// pane holds, wrapped but otherwise untouched.
-    @ViewBuilder private var outputDisclosure: some View {
-        // A dead pane has nothing to read, and herdr would answer a read for
-        // it with an error the row cannot act on.
-        if agent.state != .crashed {
-            VStack(alignment: .leading, spacing: 4) {
-                Button {
-                    toggleTranscript()
-                } label: {
-                    HStack(spacing: 3) {
-                        Image(systemName: showsTranscript ? "chevron.down" : "chevron.right")
-                            .font(.system(size: 8, weight: .bold))
-                        Text(showsTranscript ? "Hide output" : "Show output")
-                            .font(Brand.sectionLabel)
-                        if isLoadingTranscript {
-                            Text("…").font(Brand.sectionLabel)
-                        }
-                    }
-                    .foregroundStyle(Brand.secondaryText)
-                }
-                .buttonStyle(.plain)
-
-                if showsTranscript {
-                    if let transcriptFailure {
-                        Text(transcriptFailure)
-                            .font(Brand.body)
-                            .foregroundStyle(Brand.machineDown)
-                            .fixedSize(horizontal: false, vertical: true)
-                    } else if let transcript {
-                        ScrollView {
-                            Text(transcript)
-                                .font(Brand.mono)
-                                .foregroundStyle(.primary)
-                                .textSelection(.enabled)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .padding(6)
-                        }
-                        // Tall enough to read a reply in, short enough that a
-                        // panel of several rows is still a panel.
-                        .frame(maxHeight: 220)
-                        .background(
-                            RoundedRectangle(cornerRadius: Brand.insetRadius, style: .continuous)
-                                .fill(Color.primary.opacity(0.05))
-                        )
-                        // A read is a snapshot, not a feed: herdr has no
-                        // output subscription, so this is what the pane held
-                        // when it was asked. Saying so beats a view that looks
-                        // live and is not.
-                        Text("Read when opened · close and reopen to refresh")
-                            .font(Brand.sectionLabel)
-                            .foregroundStyle(Brand.secondaryText)
-                    }
-                }
-            }
-            .padding(.top, 2)
-        }
-    }
-
-    private func toggleTranscript() {
-        if showsTranscript {
-            showsTranscript = false
-            // Dropped rather than kept: reopening should show what the pane
-            // holds now, and a cached copy of a finished run is the one thing
-            // that would look current and not be.
-            transcript = nil
-            transcriptFailure = nil
-            return
-        }
-
-        showsTranscript = true
-        isLoadingTranscript = true
-        transcriptFailure = nil
-        Task {
-            do {
-                let text = try await fleet.transcript(for: agent.ref)
-                transcript = text
-                    .trimmingCharacters(in: .whitespacesAndNewlines)
-            } catch {
-                transcriptFailure = "Could not read this pane: \(error.localizedDescription)"
-            }
-            isLoadingTranscript = false
-        }
-    }
-
     @ViewBuilder private var actions: some View {
         let available = agent.actions
 
-        if available != .none || failure != nil {
+        // Console stands on every live row, so the cluster does too.
+        if available != .none || failure != nil || agent.state != .crashed {
             GlassCluster {
                 if let key = available.approveKey {
                     ActionButton(title: "Approve (\(key))", tint: Brand.color(for: .working), emphasis: .prominent) {
@@ -606,20 +491,22 @@ private struct AgentRow: View {
                         pendingEnd.toggle()
                     }
                 }
-                if available.canReply {
-                    // The open question's answer. Approve/Decline cannot
-                    // express it, and Nudge cannot be sent while blocked.
-                    ActionButton(title: "Reply", tint: Brand.accent) { open(.reply) }
-                }
-                if available.canNudge {
-                    ActionButton(title: Brand.promptAction(for: agent.state), tint: Brand.continueAction) {
-                        open(.nudge)
+                if agent.state != .crashed {
+                    // Where words go. Continue, Reply and Show output used to
+                    // live on the row; each was a guess at the pane from a
+                    // snapshot, and the console shows the pane itself. What
+                    // stays on the row is what is safe to press unseen.
+                    ActionButton(title: "Console", tint: Brand.accent) {
+                        ConsoleWindows.shared.open(
+                            agent.ref,
+                            title: "\(agent.provider) · \(agent.project) · \(machineName)",
+                            fleet: fleet
+                        )
                     }
+                    .help("Open a small window that mirrors this pane")
                 }
                 if available.canReveal {
-                    // The row's one dependable action. Approve is missing on
-                    // most prompts because most name no key, so without this
-                    // a blocked row can offer nothing but Decline.
+                    // For when the console is not enough: the full terminal.
                     // No machine name in the title: the chip on the row
                     // already says which box, and "Reveal on wsl" made the
                     // same button a different width on every row.
@@ -658,44 +545,6 @@ private struct AgentRow: View {
                     .foregroundStyle(Brand.secondaryText)
             }
 
-            if let kind = composing {
-                if let pending = pendingCompose {
-                    // Named, because the risk is not a typo — it is this text
-                    // going to the wrong row. The panel is a list of similar
-                    // rows and the buttons sit in the same place on each.
-                    GlassCluster {
-                        Text("\(kind.verb) \(agent.provider) in \(agent.project) on \(machineName)?")
-                            .font(Brand.sectionLabel)
-                            .foregroundStyle(Brand.secondaryText)
-                        ActionButton(title: "Confirm", tint: Brand.accent, emphasis: .prominent) {
-                            pendingCompose = nil
-                            composing = nil
-                            compose = ""
-                            run(kind.intervention(pending))
-                        }
-                        ActionButton(title: "Cancel", tint: Brand.secondaryText) {
-                            pendingCompose = nil
-                        }
-                        Spacer(minLength: 0)
-                    }
-                    .padding(.top, 2)
-                    Text(pending)
-                        .font(Brand.body)
-                        .foregroundStyle(Brand.secondaryText)
-                        .lineLimit(2)
-                        .fixedSize(horizontal: false, vertical: true)
-                } else {
-                    HStack(spacing: 6) {
-                        TextField(placeholder(for: kind), text: $compose)
-                            .textFieldStyle(.roundedBorder)
-                            .font(Brand.body)
-                            .onSubmit { stageCompose() }
-                        ActionButton(title: "Send", tint: Brand.accent, emphasis: .prominent) { stageCompose() }
-                    }
-                    .padding(.top, 2)
-                }
-            }
-
             // Shown in place, next to the button that failed, and left up until
             // the next attempt: a refusal that vanishes on the next refresh
             // reads as the click having worked.
@@ -714,19 +563,6 @@ private struct AgentRow: View {
                     .padding(.top, 1)
             }
         }
-    }
-
-    private func open(_ kind: ComposeKind) {
-        composing = composing == kind ? nil : kind
-        pendingCompose = nil
-        compose = ""
-    }
-
-    /// Stages the text rather than sending it. See the confirm row above.
-    private func stageCompose() {
-        let text = compose.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty else { return }
-        pendingCompose = text
     }
 
     private var machineName: String {
@@ -957,39 +793,6 @@ private struct ListHeightKey: PreferenceKey {
     static let defaultValue: CGFloat = 0
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
         value = max(value, nextValue())
-    }
-}
-
-/// The two things a row can send words with.
-///
-/// Separate cases rather than a flag, because they are valid in opposite
-/// states and travel different herdr calls: nudge is `agent.prompt` on a
-/// working agent, reply is `pane.send_text` on a blocked one, and herdr
-/// refuses each where the other belongs.
-private enum ComposeKind: Equatable {
-    case nudge
-    case reply
-
-    var placeholder: String {
-        switch self {
-        case .nudge: return "Tell it what to do"
-        case .reply: return "Answer its question"
-        }
-    }
-
-    /// Reads into the confirmation line, which names the target.
-    var verb: String {
-        switch self {
-        case .nudge: return "Send to"
-        case .reply: return "Reply to"
-        }
-    }
-
-    func intervention(_ text: String) -> Intervention {
-        switch self {
-        case .nudge: return .nudge(text)
-        case .reply: return .reply(text)
-        }
     }
 }
 

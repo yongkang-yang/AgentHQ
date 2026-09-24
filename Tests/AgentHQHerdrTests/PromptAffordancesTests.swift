@@ -165,9 +165,6 @@ struct PromptAffordancesTests {
             let actions = subject.actions(for: state, recentOutput: prompt)
             #expect(actions.approveKey == "y", "\(state)")
             #expect(actions.denyKey == "esc", "\(state)")
-            // herdr refuses agent.prompt on a blocked agent outright, so the
-            // button is hidden rather than shown and then failing.
-            #expect(!actions.canNudge, "\(state)")
             // The conversation can still be ended while it is blocked.
             #expect(actions.canEnd, "\(state)")
         }
@@ -178,37 +175,6 @@ struct PromptAffordancesTests {
             let actions = subject.actions(for: state, recentOutput: prompt)
             #expect(actions.approveKey == nil, "\(state)")
             #expect(actions.denyKey == nil, "\(state)")
-            #expect(actions.canNudge, "\(state)")
-        }
-    }
-
-    @Test("only an open question takes a typed answer")
-    func replyIsOnlyForOpenQuestions() {
-        let question = "Which database should I migrate first?"
-        let menu = "run this command?\n  -> run (once) (y)\n     skip (esc or n)"
-
-        // The open question is the one Approve and Decline cannot express.
-        #expect(subject.actions(for: .needsInput, recentOutput: question).canReply)
-
-        // An approval prompt's named keys are its answer. Typing at a
-        // highlighted-row menu goes into a filter or nowhere, so a Reply box
-        // there would look like it works and usually would not.
-        #expect(!subject.actions(for: .needsApproval, recentOutput: menu).canReply)
-
-        // And never on an agent that is not waiting for anything.
-        for state in [AgentState.working, .finished, .rateLimited, .ciFailed, .mergeConflict, .unknown, .crashed] {
-            #expect(!subject.actions(for: state, recentOutput: question).canReply, "\(state)")
-        }
-    }
-
-    @Test("reply and nudge are never both offered")
-    func replyAndNudgeAreExclusive() {
-        // They travel different herdr calls and are valid in opposite states.
-        // herdr refuses agent.prompt while blocked, which is exactly when
-        // reply applies.
-        for state in AgentState.allCases {
-            let actions = subject.actions(for: state, recentOutput: "Which one?")
-            #expect(!(actions.canReply && actions.canNudge), "\(state)")
         }
     }
 
@@ -218,7 +184,7 @@ struct PromptAffordancesTests {
         // every one of these would be a button that silently does not work.
         let actions = subject.actions(for: .crashed, recentOutput: "run (once) (y)")
         #expect(actions == .none)
-        for intervention in [Intervention.approve, .deny, .end, .nudge("go on"), .reply("yes"), .reveal] {
+        for intervention in [Intervention.approve, .deny, .end, .reveal] {
             #expect(!actions.allows(intervention), "\(intervention)")
         }
     }
@@ -231,7 +197,6 @@ struct PromptAffordancesTests {
         )
         #expect(!menu.allows(.approve))
         #expect(menu.allows(.deny))
-        #expect(!menu.allows(.nudge("x")))
         // End is offered wherever the agent is alive, blocked included.
         #expect(menu.allows(.end))
     }

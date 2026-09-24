@@ -363,23 +363,69 @@ public actor MachineSession {
         }
     }
 
-    /// The pane's recent output, verbatim, for a reader rather than the
-    /// classifier.
+    /// The pane's recent output, for a console window that mirrors it.
     ///
-    /// Read on demand instead of carried on every ``Agent``: the steady-state
-    /// refresh already reads 60 wrapped lines per stopped pane to classify it,
-    /// and widening that to something worth reading would multiply the cost of
-    /// every poll — on a tunnelled machine, per pane, forever — to populate a
-    /// view almost no row is showing.
-    public func transcript(for agentId: AgentID, lines: Int = 200) async throws -> String {
+    /// The scrollback tail, not `visible`: the screen alone is one pane-height,
+    /// and a reply longer than that arrived in the console with its opening
+    /// cut off. Unwrapped, because the window re-wraps at its own width.
+    ///
+    /// An agent drawing on the alternate screen — Claude Code in fullscreen —
+    /// has no host scrollback, and this comes back as the screen and no more
+    /// (measured against herdr 0.9.1: 58 rows for 400 asked). Older output
+    /// there is the agent's to scroll, not herdr's to read.
+    ///
+    /// A read does not mark the agent seen — see invariant 9.
+    public func screen(for agentId: AgentID, lines: Int = 400) async throws -> String {
         guard let client else { throw InterventionError.agentGone }
-        let text = try await client.readPane(
-            paneId: agentId.raw, lines: lines, source: .recentUnwrapped
-        )
-        guard let text, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            throw InterventionError.agentGone
+        var text: String?
+        try await send {
+            text = try await client.readPane(
+                paneId: agentId.raw, lines: lines, source: .recentUnwrapped
+            )
         }
-        return text
+        return text ?? ""
+    }
+
+    /// Press keys in a pane from the console window.
+    ///
+    /// Deliberately outside `perform`'s staleness guard. The guard exists
+    /// because a panel row is a photograph taken up to a refresh ago; the
+    /// console is the user watching the live screen and pressing keys at it,
+    /// the same as they would in Ghostty. It is still an intervention, so the
+    /// row counts as seen.
+    public func press(_ keys: [String], in agentId: AgentID) async throws {
+        guard let client else { throw InterventionError.agentGone }
+        try await send { try await client.sendKeys(paneId: agentId.raw, keys: keys) }
+        markSeen(agentId)
+    }
+
+    /// Submit a line typed into the console window.
+    ///
+    /// The path is chosen by herdr's status, re-read now rather than taken
+    /// from the row. An agent waiting for input takes `agent.prompt`, which
+    /// sends the text and its Enter as one bracketed-paste submission, so a
+    /// long or multi-line message cannot arrive split. A blocked agent refuses
+    /// that call outright (invariant 10), and its question is what the user is
+    /// answering, so it gets the text typed with its newline.
+    ///
+    /// If the agent blocks between the read and the prompt, herdr refuses with
+    /// `agent_blocked` and nothing is sent: text meant for the agent must not
+    /// land in a dialog the user had not seen yet.
+    public func submit(_ text: String, to agentId: AgentID) async throws {
+        guard let client else { throw InterventionError.agentGone }
+        let status = try await client.agent(paneId: agentId.raw)?.agentStatus.lowercased()
+        if text.isEmpty {
+            try await send { try await client.sendKeys(paneId: agentId.raw, keys: ["enter"]) }
+        } else if status == nil || status == "blocked" {
+            // One call, with the newline inside it. Sending the text and then
+            // an Enter separately leaves a failure mode where the words land
+            // and the submit does not, and the agent sits holding half an
+            // answer in its input.
+            try await send { try await client.sendText(paneId: agentId.raw, text: text + "\n") }
+        } else {
+            try await send { try await client.prompt(paneId: agentId.raw, text: text) }
+        }
+        markSeen(agentId)
     }
 
     // MARK: - Interventions
@@ -431,31 +477,6 @@ public actor MachineSession {
             // guard here would refuse precisely when looking is most useful.
             try await send { try await client.focusPane(paneId: agentId.raw) }
 
-        case .nudge(let text):
-            let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !trimmed.isEmpty else { throw InterventionError.notOffered }
-            try await verifyUnmoved(agent, using: client)
-            try await send { try await client.prompt(paneId: agentId.raw, text: trimmed) }
-
-        case .reply(let text):
-            let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !trimmed.isEmpty else { throw InterventionError.notOffered }
-
-            // The stamp check, and nothing more. Approve can re-read the
-            // prompt and confirm it still names the same key; a reply has no
-            // key to re-verify, so an unchanged `state_change_seq` — meaning
-            // this agent has not moved since the row was built — is the whole
-            // guarantee. That is weaker than Approve's, and the reason to say
-            // so here rather than let it read as equivalent.
-            try await verifyUnmoved(agent, using: client)
-
-            // One call, with the newline inside it. Sending the text and then
-            // an Enter separately leaves a failure mode where the words land
-            // and the submit does not, and the agent sits holding half an
-            // instruction in its input.
-            try await send {
-                try await client.sendText(paneId: agentId.raw, text: trimmed + "\n")
-            }
         }
 
         markSeen(agentId)

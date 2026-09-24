@@ -202,7 +202,7 @@ design discussion, not a refactor.
 
     **End reads its keys the same way.** `Intervention.end` quits the agent
     and leaves the pane and its scrollback — `pane.close` would take the
-    record of what the agent did with it, and Show output depends on that.
+    record of what the agent did with it, and the console depends on that.
 
     No manifest names an exit key; herdr's manifests carry detection rules
     only. So End reads the pane, in three steps, pressing nothing it was not

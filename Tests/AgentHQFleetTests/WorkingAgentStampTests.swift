@@ -8,7 +8,7 @@ import Testing
 /// drives one: a `pane_updated` event carrying the new status, and an agent
 /// view that only answers when asked.
 private actor StampClient: HerdrClient {
-    private(set) var sentPrompts: [String] = []
+    private(set) var sentKeys: [[String]] = []
     private(set) var agentViewReads = 0
     private var status = "idle"
     private var seq: UInt64 = 100
@@ -57,7 +57,11 @@ private actor StampClient: HerdrClient {
     }
 
     nonisolated func events() -> AsyncStream<HerdrEvent> { stream }
-    func readPane(paneId: String, lines: Int, source: PaneReadSource) async throws -> String? { nil }
+    /// A blocked agent shows an approval prompt naming its keys, so the row
+    /// offers Approve — the guarded action these tests exercise.
+    func readPane(paneId: String, lines: Int, source: PaneReadSource) async throws -> String? {
+        status == "blocked" ? "run (once) (y)\nskip (esc or n)" : nil
+    }
 
     func agents() async throws -> [HerdrAgentInfo] {
         agentViewReads += 1
@@ -71,9 +75,9 @@ private actor StampClient: HerdrClient {
         return HerdrAgentInfo(paneId: "w:p1", agent: "claude", agentStatus: status, stateChangeSeq: seq)
     }
 
-    func sendKeys(paneId: String, keys: [String]) async throws {}
+    func sendKeys(paneId: String, keys: [String]) async throws { sentKeys.append(keys) }
     func sendText(paneId: String, text: String) async throws {}
-    func prompt(paneId: String, text: String) async throws { sentPrompts.append(text) }
+    func prompt(paneId: String, text: String) async throws {}
     func focusPane(paneId: String) async throws {}
 }
 
@@ -82,8 +86,8 @@ private actor StampClient: HerdrClient {
 ///
 /// A `pane_updated` event carries no stamp, and the agent view used to be
 /// fetched only for panes that had *stopped*. So an agent that had just
-/// started working had none — and working is exactly when its one guarded
-/// action, Nudge, is offered.
+/// changed state had none, and its guarded actions refused until the next
+/// full resync.
 @Suite("A row that has just changed state can still be acted on")
 struct WorkingAgentStampTests {
     private func settle() async throws {
@@ -100,22 +104,22 @@ struct WorkingAgentStampTests {
         return session
     }
 
-    /// The reported bug, in the action that survived it. Without the stamp the
-    /// guard refused — correctly by its own rules — for the whole window
-    /// between the agent starting work and the next full resync.
-    @Test("an agent that just started working can still be nudged")
-    func nudgesAFreshlyWorkingAgent() async throws {
+    /// The reported bug, in the guarded action that remains. Without the
+    /// stamp the guard refused — correctly by its own rules — for the whole
+    /// window between the state change and the next full resync.
+    @Test("an agent that has just blocked can be approved at once")
+    func approvesAFreshlyBlockedAgent() async throws {
         let client = StampClient()
         let session = await started(client)
         try await settle()
         #expect(await session.view().agents.first?.state == .idle)
 
-        await client.move(to: "working")
+        await client.move(to: "blocked")
         try await settle()
-        #expect(await session.view().agents.first?.state == .working)
+        #expect(await session.view().agents.first?.state == .needsApproval)
 
-        try await session.perform(.nudge("also check the tests"), on: AgentID("w:p1"))
-        #expect(await client.sentPrompts == ["also check the tests"])
+        try await session.perform(.approve, on: AgentID("w:p1"))
+        #expect(await client.sentKeys == [["y"]])
         await session.stop()
     }
 
@@ -172,14 +176,14 @@ struct WorkingAgentStampTests {
         // rebuilt without a stamp. By the time the user clicks, herdr answers
         // again — but the row in hand still has nothing to compare.
         await client.withholdAgentViews()
-        await client.move(to: "working")
+        await client.move(to: "blocked")
         try await settle()
         await client.restoreAgentViews()
 
         await #expect(throws: InterventionError.unverifiable) {
-            try await session.perform(.nudge("carry on"), on: AgentID("w:p1"))
+            try await session.perform(.approve, on: AgentID("w:p1"))
         }
-        #expect(await client.sentPrompts.isEmpty)
+        #expect(await client.sentKeys.isEmpty)
         await session.stop()
     }
 }
