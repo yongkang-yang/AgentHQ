@@ -177,7 +177,7 @@ private struct MachineBar: View {
     let fleet: FleetStore
 
     var body: some View {
-        HStack(spacing: 14) {
+        HStack(spacing: 8) {
             ForEach(machines) { view in
                 item(view)
             }
@@ -204,6 +204,16 @@ private struct MachineBar: View {
                         .buttonStyle(.link)
                 }
             } else {
+                // Named when remote: two terminals side by side are two
+                // identical glyphs, and hovering to tell them apart defeats a
+                // line meant to be read at a glance. This Mac is the only
+                // laptop, so it needs no name.
+                if view.machine.transport.isRemote {
+                    Text(view.machine.displayName)
+                        .font(Brand.mono)
+                        .foregroundStyle(.primary)
+                        .lineLimit(1)
+                }
                 // A disabled machine keeps its glyph, dimmed, with no count:
                 // it is not watched, so it has no count to report.
                 Text(view.machine.isEnabled ? "\(view.agents.count)" : "–")
@@ -211,6 +221,12 @@ private struct MachineBar: View {
                     .foregroundStyle(Brand.secondaryText)
             }
         }
+        // The same wash as the machine's chip on every agent row, so the
+        // foot of the panel and the rows above it sort by the same colour.
+        .padding(.horizontal, 7)
+        .padding(.vertical, 2)
+        .background(Capsule().fill(Brand.machineColor(for: view.machine.id).opacity(0.2)))
+        .overlay(Capsule().strokeBorder(Brand.machineColor(for: view.machine.id).opacity(0.45), lineWidth: 0.5))
         .opacity(view.machine.isEnabled ? 1 : 0.45)
         .help("\(view.machine.displayName): \(view.statusText)")
     }
