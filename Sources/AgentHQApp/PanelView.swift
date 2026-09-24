@@ -16,8 +16,8 @@ struct PanelView: View {
     @State private var now = Date()
     /// What the agent list measured itself to be. See the frame below.
     @State private var listHeight: CGFloat = 0
-    /// What the last Open herdr click did, until the next one.
-    @State private var openNote: OpenNote?
+    /// What the last Open herdr click or machine switch did, until the next.
+    @State private var headerNote: HeaderNote?
 
     static let minimumListHeight: CGFloat = 96
     static let maximumListHeight: CGFloat = 460
@@ -132,24 +132,25 @@ struct PanelView: View {
                     .foregroundStyle(Brand.secondaryText)
             }
             if let local = fleet.snapshot.machines.first(where: { $0.machine.transport.isLocal }) {
-                OpenHerdrButton(view: local, fleet: fleet, note: $openNote)
+                OpenHerdrButton(view: local, fleet: fleet, note: $headerNote)
             }
             SettingsMenu(
                 machines: fleet.snapshot.machines.map(MachineMenuEntry.init),
                 notifier: notifier,
-                fleet: fleet
+                fleet: fleet,
+                note: $headerNote
             )
             .equatable()
         }
         .padding(.horizontal, 14)
         .padding(.top, 12)
-        .padding(.bottom, openNote == nil ? 4 : 0)
+        .padding(.bottom, headerNote == nil ? 4 : 0)
         // Under the header rather than in it: a failure here is a sentence
         // (usually the Automation grant), and the header has no room for one.
-        if let openNote {
-            Text(openNote.text)
+        if let headerNote {
+            Text(headerNote.text)
                 .font(Brand.sectionLabel)
-                .foregroundStyle(openNote.isFailure ? Brand.machineDown : Brand.secondaryText)
+                .foregroundStyle(headerNote.isFailure ? Brand.machineDown : Brand.secondaryText)
                 .fixedSize(horizontal: false, vertical: true)
                 .padding(.horizontal, 14)
                 .padding(.bottom, 4)
@@ -792,6 +793,7 @@ private struct SettingsMenu: View, Equatable {
     let machines: [MachineMenuEntry]
     let notifier: Notifier
     let fleet: FleetStore
+    @Binding var note: HeaderNote?
 
     // Spelled out so the panel's once-a-second tick, which re-runs the
     // header, cannot re-run this. The notification switches are read through
@@ -809,7 +811,7 @@ private struct SettingsMenu: View, Equatable {
                 ForEach(machines) { entry in
                     Toggle(entry.name, isOn: Binding(
                         get: { entry.isEnabled },
-                        set: { fleet.setEnabled($0, for: entry.id) }
+                        set: { setEnabled($0, entry) }
                     ))
                 }
             }
@@ -852,6 +854,35 @@ private struct SettingsMenu: View, Equatable {
                 .allowsHitTesting(false)
         )
     }
+
+    /// A machine herdr saved is switched in herdr, not only here.
+    ///
+    /// AgentHQ reads its machines, enabled flag included, from herdr's own
+    /// registry. Switching only the session here left herdr saying disabled —
+    /// so a herdr client opened with Open herdr still skipped the machine,
+    /// and the next launch imported it disabled again. herdr's CLI owns that
+    /// file, so it makes the change; the session follows only once it has,
+    /// which keeps the two from disagreeing when the command fails.
+    ///
+    /// This Mac is not a herdr machine profile and is switched here alone.
+    private func setEnabled(_ isEnabled: Bool, _ entry: MachineMenuEntry) {
+        note = nil
+        guard entry.isHerdrProfile else {
+            fleet.setEnabled(isEnabled, for: entry.id)
+            return
+        }
+        Task {
+            do {
+                try await HerdrMachineCLI.setEnabled(isEnabled, profile: entry.id.raw)
+                fleet.setEnabled(isEnabled, for: entry.id)
+            } catch {
+                note = HeaderNote(
+                    text: "Could not \(isEnabled ? "enable" : "disable") \(entry.name): \(error.localizedDescription)",
+                    isFailure: true
+                )
+            }
+        }
+    }
 }
 
 /// What the settings menu shows of a machine, and nothing that moves on its
@@ -860,16 +891,19 @@ struct MachineMenuEntry: Equatable, Identifiable {
     let id: MachineID
     let name: String
     let isEnabled: Bool
+    /// Imported from herdr's registry, whose profile id it kept.
+    let isHerdrProfile: Bool
 
     init(_ view: MachineView) {
         id = view.id
         name = view.shortName
         isEnabled = view.machine.isEnabled
+        isHerdrProfile = view.machine.transport.isRemote
     }
 }
 
-/// What an Open herdr click reports back to the header.
-struct OpenNote: Equatable {
+/// What an Open herdr click or a machine switch reports back to the header.
+struct HeaderNote: Equatable {
     let text: String
     let isFailure: Bool
 }
@@ -883,7 +917,7 @@ struct OpenNote: Equatable {
 struct OpenHerdrButton: View {
     let view: MachineView
     let fleet: FleetStore
-    @Binding var note: OpenNote?
+    @Binding var note: HeaderNote?
 
     var body: some View {
         ActionButton(
@@ -899,10 +933,10 @@ struct OpenHerdrButton: View {
         let isServing = view.reachability.isConnected
         do {
             let result = try GhosttyReveal.open(machine: view.machine, isServing: isServing)
-            note = isServing ? nil : OpenNote(text: result, isFailure: false)
+            note = isServing ? nil : HeaderNote(text: result, isFailure: false)
             if !isServing { Self.retrySoon(view.machine.id, fleet: fleet) }
         } catch {
-            note = OpenNote(text: error.localizedDescription, isFailure: true)
+            note = HeaderNote(text: error.localizedDescription, isFailure: true)
         }
     }
 

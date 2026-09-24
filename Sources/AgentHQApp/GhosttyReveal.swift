@@ -131,15 +131,18 @@ enum GhosttyReveal {
     }
 
     static func herdrCommand(for machine: Machine, home: String = NSHomeDirectory()) throws -> String {
+        guard let binary = herdrBinary(home: home) else { throw RevealError.herdrMissing }
+        return try command(binary: binary, for: machine)
+    }
+
+    /// Where herdr is installed. An app launched from Finder gets launchd's
+    /// short PATH, not the shell's, so the usual install locations come first.
+    nonisolated static func herdrBinary(home: String = NSHomeDirectory()) -> String? {
         let candidates = [
             "\(home)/.local/bin/herdr", "/opt/homebrew/bin/herdr", "/usr/local/bin/herdr",
         ] + (ProcessInfo.processInfo.environment["PATH"] ?? "")
             .split(separator: ":").map { "\($0)/herdr" }
-        guard let binary = candidates.first(where: FileManager.default.isExecutableFile(atPath:)) else {
-            throw RevealError.herdrMissing
-        }
-
-        return try command(binary: binary, for: machine)
+        return candidates.first(where: FileManager.default.isExecutableFile(atPath:))
     }
 
     /// Variables herdr exports into every pane. A Ghostty launched from inside
