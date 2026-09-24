@@ -91,17 +91,17 @@ struct PanelView: View {
                 }
             }
 
-            // Only while a machine is in trouble. The machines themselves
-            // live in the settings menu; this is what keeps a down one from
-            // hiding in there (invariant 2 cuts both ways: a down machine is
-            // not a dead agent, and it is not nothing either).
-            if !troubled.isEmpty {
+            // The machines, one glyph and a count each. Always shown, so a
+            // down machine is on screen rather than inside the settings menu
+            // (invariant 2 cuts both ways: a down machine is not a dead
+            // agent, and it is not nothing either).
+            if !fleet.snapshot.machines.isEmpty {
                 // Inset, as a Tahoe menu's separators are: a full-bleed rule
                 // cuts the glass in two instead of dividing what sits on it.
                 Divider().padding(.horizontal, 14)
-                MachineTrouble(machines: troubled, fleet: fleet)
+                MachineBar(machines: fleet.snapshot.machines, fleet: fleet)
                     .padding(.horizontal, 14)
-                    .padding(.vertical, 10)
+                    .padding(.vertical, 8)
             }
         }
         .frame(width: 460)
@@ -161,49 +161,69 @@ struct PanelView: View {
         }
         .padding(14)
     }
-
-    private var troubled: [MachineView] {
-        fleet.snapshot.machines.filter { $0.machine.isEnabled && !$0.reachability.isConnected }
-    }
 }
 
-/// The machines that are not simply connected, named, with the one thing to
-/// do about them.
+/// Every machine as a glyph and its agent count: a Mac for this one, a
+/// terminal for the rest.
 ///
-/// "build-box unreachable", not "1 unreachable", so the line alone says which
-/// box to look at. The verbatim reason is in the tooltip and in the settings
-/// menu, which have room for a sentence.
-private struct MachineTrouble: View {
+/// A connected machine needs nothing more — which box it is shows in the
+/// tooltip and on every agent row. One that is not connected spends the room
+/// the count saved: tinted, named, its state in a word, and Retry. "wsl
+/// unreachable", not a red dot, so the line alone says which box to look at.
+/// The verbatim reason is in the tooltip and the settings menu, which have
+/// room for a sentence.
+private struct MachineBar: View {
     let machines: [MachineView]
     let fleet: FleetStore
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
+        HStack(spacing: 14) {
             ForEach(machines) { view in
-                HStack(spacing: 6) {
-                    Circle()
-                        .fill(view.dotColor)
-                        .frame(width: 6, height: 6)
-                    MachineTag(name: view.machine.displayName, id: view.machine.id)
-                    Text(view.shortStatus)
+                item(view)
+            }
+            Spacer(minLength: 0)
+        }
+    }
+
+    @ViewBuilder private func item(_ view: MachineView) -> some View {
+        let isTroubled = view.machine.isEnabled && !view.reachability.isConnected
+        HStack(spacing: 4) {
+            Image(systemName: view.symbol)
+                .font(.system(size: 12))
+                .foregroundStyle(isTroubled ? view.dotColor : Brand.secondaryText)
+            if isTroubled {
+                Text("\(view.machine.displayName) \(view.shortStatus)")
+                    .font(Brand.sectionLabel)
+                    .foregroundStyle(view.isDown ? Brand.machineDown : Brand.secondaryText)
+                    .lineLimit(1)
+                if view.canRetry {
+                    // Rather than waiting out a reconnect cycle while
+                    // looking at a machine you know is back.
+                    Button("Retry") { fleet.retry(view.machine.id) }
                         .font(Brand.sectionLabel)
-                        .foregroundStyle(view.isDown ? Brand.machineDown : Brand.secondaryText)
-                    Spacer(minLength: 0)
-                    if view.canRetry {
-                        // Rather than waiting out a reconnect cycle while
-                        // looking at a machine you know is back.
-                        Button("Retry") { fleet.retry(view.machine.id) }
-                            .font(Brand.sectionLabel)
-                            .buttonStyle(.link)
-                    }
+                        .buttonStyle(.link)
                 }
-                .help(view.statusText)
+            } else {
+                // A disabled machine keeps its glyph, dimmed, with no count:
+                // it is not watched, so it has no count to report.
+                Text(view.machine.isEnabled ? "\(view.agents.count)" : "–")
+                    .font(Brand.mono)
+                    .foregroundStyle(Brand.secondaryText)
             }
         }
+        .opacity(view.machine.isEnabled ? 1 : 0.45)
+        .help("\(view.machine.displayName): \(view.statusText)")
     }
 }
 
 extension MachineView {
+    /// This Mac as a Mac. SF Symbols has no Linux mark, and a remote machine
+    /// is reached through a shell whatever it runs, so the rest are a
+    /// terminal.
+    var symbol: String {
+        machine.transport.isLocal ? "laptopcomputer" : "terminal"
+    }
+
     /// A failure the user is being asked to look at. `reconnecting` is not
     /// one — see ``MachineReachability/isTransient``.
     var isDown: Bool {
