@@ -121,6 +121,16 @@ struct ConsoleTests {
         await session.stop()
     }
 
+    /// herdr has no key name for paging, so it goes as the raw sequence.
+    @Test("paging sends xterm's PageUp and PageDown bytes")
+    func pagesWithRawSequences() async throws {
+        let (session, client) = await session(status: "working")
+        try await session.page(.up, in: pane)
+        try await session.page(.down, in: pane)
+        #expect(await client.calls == [.text("\u{1B}[5~"), .text("\u{1B}[6~")])
+        await session.stop()
+    }
+
     @Test("an agent on an unknown machine reports it rather than hanging")
     func unknownMachine() async throws {
         let store = await FleetStore()

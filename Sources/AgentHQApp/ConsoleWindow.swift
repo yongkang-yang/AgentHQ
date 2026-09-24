@@ -131,6 +131,10 @@ private struct ConsoleView: View {
                     ActionButton(title: "↑", tint: Brand.secondaryText) { press("up") }
                     ActionButton(title: "↓", tint: Brand.secondaryText) { press("down") }
                     ActionButton(title: "tab", tint: Brand.secondaryText) { press("tab") }
+                    ActionButton(title: "pgup", tint: Brand.secondaryText) { page(.up) }
+                        .help("Page the agent's own view up")
+                    ActionButton(title: "pgdn", tint: Brand.secondaryText) { page(.down) }
+                        .help("Page down — back to the latest message")
                     ActionButton(title: "enter", tint: Brand.accent) { press("enter") }
                 }
             }
@@ -230,6 +234,10 @@ private struct ConsoleView: View {
 
     private func press(_ key: String) {
         act { try await fleet.press([key], in: ref) }
+    }
+
+    private func page(_ direction: PageDirection) {
+        act { try await fleet.page(direction, in: ref) }
     }
 
     private func act(_ body: @escaping @MainActor () async throws -> Void) {

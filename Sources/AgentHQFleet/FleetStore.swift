@@ -186,6 +186,12 @@ public final class FleetStore {
         await refresh()
     }
 
+    /// Page the agent's own view. See `MachineSession.page(_:in:)`.
+    public func page(_ direction: PageDirection, in ref: AgentRef) async throws {
+        guard let session = sessions[ref.machine] else { throw InterventionError.agentGone }
+        try await session.page(direction, in: ref.agent)
+    }
+
     /// Submit a line typed into the console window. See
     /// `MachineSession.submit(_:to:)` for which herdr call it takes.
     public func submit(_ text: String, to ref: AgentRef) async throws {

@@ -399,6 +399,22 @@ public actor MachineSession {
         markSeen(agentId)
     }
 
+    /// Page the agent's own view up or down, from the console window.
+    ///
+    /// For an agent drawing on the alternate screen — Claude Code in
+    /// fullscreen — its scrolled-back view is the only history there is, and
+    /// it can be left parked above the latest message ("1 new message ↓")
+    /// with no way back from the console. Sent as the raw xterm sequence
+    /// because herdr 0.9.1 has no key name for it: `pageup`, `pagedown`,
+    /// `end` and their spellings all come back `invalid_key`. `pane.send_text`
+    /// delivers escape bytes verbatim — checked with `cat -v` in a scratch
+    /// pane — and Claude Code pages on them.
+    public func page(_ direction: PageDirection, in agentId: AgentID) async throws {
+        guard let client else { throw InterventionError.agentGone }
+        try await send { try await client.sendText(paneId: agentId.raw, text: direction.sequence) }
+        markSeen(agentId)
+    }
+
     /// Submit a line typed into the console window.
     ///
     /// The path is chosen by herdr's status, re-read now rather than taken
@@ -753,6 +769,20 @@ public actor MachineSession {
             agents[index] = updated
         } else {
             agents.append(agent)
+        }
+    }
+}
+
+/// A page key, for ``MachineSession/page(_:in:)``.
+public enum PageDirection: Sendable {
+    case up
+    case down
+
+    /// xterm's PageUp and PageDown.
+    var sequence: String {
+        switch self {
+        case .up:   return "\u{1B}[5~"
+        case .down: return "\u{1B}[6~"
         }
     }
 }
