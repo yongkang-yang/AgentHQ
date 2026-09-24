@@ -107,7 +107,7 @@ final class AgentHQApp: NSObject, NSApplicationDelegate {
         }
     }
 
-    /// Without a main menu, ⌘C/⌘V in the reply field do nothing. `MenuBarExtra`
+    /// Without a main menu, ⌘C/⌘V in a text field and ⌘W do nothing. `MenuBarExtra`
     /// installed one for free; a hand-built status item has to.
     private func installMainMenu() {
         let main = NSMenu()
@@ -121,6 +121,18 @@ final class AgentHQApp: NSObject, NSApplicationDelegate {
         )
         appItem.submenu = appMenu
         main.addItem(appItem)
+
+        // ⌘W for the console windows. The menu-bar panel has no close button,
+        // so `performClose` there is a beep; Escape is its close.
+        let fileItem = NSMenuItem()
+        let fileMenu = NSMenu(title: "File")
+        fileMenu.addItem(
+            withTitle: "Close Window",
+            action: #selector(NSWindow.performClose(_:)),
+            keyEquivalent: "w"
+        )
+        fileItem.submenu = fileMenu
+        main.addItem(fileItem)
 
         let editItem = NSMenuItem()
         let editMenu = NSMenu(title: "Edit")

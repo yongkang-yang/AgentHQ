@@ -25,7 +25,9 @@ final class ConsoleWindows {
 
         let panel = NSPanel(
             contentRect: NSRect(x: 0, y: 0, width: 720, height: 480),
-            styleMask: [.titled, .closable, .resizable, .miniaturizable, .utilityWindow],
+            // Not `.utilityWindow`: its shrunken title bar made the window
+            // controls too small to hit comfortably.
+            styleMask: [.titled, .closable, .resizable, .miniaturizable],
             backing: .buffered,
             defer: false
         )
