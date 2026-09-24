@@ -134,7 +134,12 @@ struct PanelView: View {
             if let local = fleet.snapshot.machines.first(where: { $0.machine.transport.isLocal }) {
                 OpenHerdrButton(view: local, fleet: fleet, note: $openNote)
             }
-            SettingsMenu(notifier: notifier, fleet: fleet)
+            SettingsMenu(
+                machines: fleet.snapshot.machines.map(MachineMenuEntry.init),
+                notifier: notifier,
+                fleet: fleet
+            )
+            .equatable()
         }
         .padding(.horizontal, 14)
         .padding(.top, 12)
@@ -222,7 +227,7 @@ private struct MachineBar: View {
         .background(Capsule().fill(Brand.machineColor(for: view.machine.id).opacity(0.2)))
         .overlay(Capsule().strokeBorder(Brand.machineColor(for: view.machine.id).opacity(0.45), lineWidth: 0.5))
         .opacity(view.machine.isEnabled ? 1 : 0.45)
-        .help("\(view.machine.displayName): \(view.statusText)")
+        .help(view.tooltip)
     }
 }
 
@@ -249,6 +254,13 @@ extension MachineView {
             }
         }
         return result
+    }
+
+    /// Name, status verbatim, and herdr's version once it has answered.
+    var tooltip: String {
+        var text = "\(machine.displayName): \(statusText)"
+        if let herdrVersion, reachability.isConnected { text += " · herdr \(herdrVersion)" }
+        return text
     }
 
     /// The bar's label: "Mac", "WSL", or the machine's own name with a
@@ -768,15 +780,37 @@ private struct AgentRow: View {
 /// the panel on every open for switches that are set once. The menu is a
 /// real `NSMenu`, not a view inside the panel, so it adds nothing that
 /// animates inside `MenuBarExtra` (invariant 12).
-private struct SettingsMenu: View {
+///
+/// The menu must not be rebuilt while it is open: SwiftUI replaces the
+/// `NSMenu`'s items when this body runs again, and a submenu open at the time
+/// collapses under the pointer. The body used to read the fleet snapshot,
+/// which is reassigned every 1.5 seconds, so a machine's submenu closed
+/// before Enable could be reached. So the machines arrive as plain values
+/// that change only when something shown in the menu does, and each is one
+/// flat item rather than a submenu.
+private struct SettingsMenu: View, Equatable {
+    let machines: [MachineMenuEntry]
     let notifier: Notifier
     let fleet: FleetStore
 
+    // Spelled out so the panel's once-a-second tick, which re-runs the
+    // header, cannot re-run this. The notification switches are read through
+    // Observation, which still redraws them when they change.
+    nonisolated static func == (lhs: SettingsMenu, rhs: SettingsMenu) -> Bool {
+        lhs.machines == rhs.machines && lhs.notifier === rhs.notifier && lhs.fleet === rhs.fleet
+    }
+
     var body: some View {
         Menu {
-            Section("Machines") {
-                ForEach(fleet.snapshot.machines) { view in
-                    MachineMenu(view: view, fleet: fleet)
+            Section("Watch machines") {
+                // Checked is watched. The state and reason live in the
+                // machine bar's tooltip, which updates without closing
+                // anything.
+                ForEach(machines) { entry in
+                    Toggle(entry.name, isOn: Binding(
+                        get: { entry.isEnabled },
+                        set: { fleet.setEnabled($0, for: entry.id) }
+                    ))
                 }
             }
             Divider()
@@ -820,38 +854,17 @@ private struct SettingsMenu: View {
     }
 }
 
-/// One machine as a submenu: its state in the title, what can be done about
-/// it inside.
-///
-/// A menu item cannot be coloured, so the state is a word, and the reason for
-/// a failure is shown whole as the submenu's first line — the tooltip it used
-/// to be in does not exist in a menu.
-private struct MachineMenu: View {
-    let view: MachineView
-    let fleet: FleetStore
+/// What the settings menu shows of a machine, and nothing that moves on its
+/// own — see ``SettingsMenu``.
+struct MachineMenuEntry: Equatable, Identifiable {
+    let id: MachineID
+    let name: String
+    let isEnabled: Bool
 
-    var body: some View {
-        Menu(title) {
-            Text(view.statusText)
-            if let version = view.herdrVersion, view.reachability.isConnected {
-                Text("herdr \(version)")
-            }
-            Divider()
-            if view.canRetry {
-                Button("Retry") { fleet.retry(view.machine.id) }
-            }
-            Button(view.machine.isEnabled ? "Disable" : "Enable") {
-                fleet.setEnabled(!view.machine.isEnabled, for: view.machine.id)
-            }
-        }
-    }
-
-    private var title: String {
-        let agents = view.agents.count
-        let count = agents == 1 ? "1 agent" : "\(agents) agents"
-        return view.reachability.isConnected
-            ? "\(view.machine.displayName) — \(count)"
-            : "\(view.machine.displayName) — \(view.shortStatus)"
+    init(_ view: MachineView) {
+        id = view.id
+        name = view.shortName
+        isEnabled = view.machine.isEnabled
     }
 }
 
