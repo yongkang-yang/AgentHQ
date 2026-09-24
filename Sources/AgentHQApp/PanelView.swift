@@ -844,7 +844,7 @@ struct OpenHerdrButton: View {
     var body: some View {
         ActionButton(
             title: view.reachability.isConnected ? "Open herdr" : "Start herdr",
-            tint: Brand.revealAction
+            tint: .primary
         ) { open() }
         .help(view.reachability.isConnected
               ? "Show this Mac's herdr in Ghostty"
