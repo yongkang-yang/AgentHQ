@@ -166,8 +166,7 @@ struct PanelView: View {
 /// Every machine as a glyph and its agent count, one glyph per machine —
 /// see ``MachineView/symbols(for:)``.
 ///
-/// A connected machine needs nothing more: the glyph and the colour wash say
-/// which box, and the tooltip names it. One that is not connected spends the room
+/// A connected machine needs nothing more than a short name beside it. One that is not connected spends the room
 /// the count saved: tinted, named, its state in a word, and Retry. "wsl
 /// unreachable", not a red dot, so the line alone says which box to look at.
 /// The verbatim reason is in the tooltip and the settings menu, which have
@@ -193,7 +192,7 @@ private struct MachineBar: View {
                 .font(.system(size: 12))
                 .foregroundStyle(isTroubled ? view.dotColor : Brand.secondaryText)
             if isTroubled {
-                Text("\(view.machine.displayName) \(view.shortStatus)")
+                Text("\(view.shortName) \(view.shortStatus)")
                     .font(Brand.sectionLabel)
                     .foregroundStyle(view.isDown ? Brand.machineDown : Brand.secondaryText)
                     .lineLimit(1)
@@ -205,6 +204,10 @@ private struct MachineBar: View {
                         .buttonStyle(.link)
                 }
             } else {
+                Text(view.shortName)
+                    .font(Brand.sectionLabel)
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
                 // A disabled machine keeps its glyph, dimmed, with no count:
                 // it is not watched, so it has no count to report.
                 Text(view.machine.isEnabled ? "\(view.agents.count)" : "–")
@@ -232,7 +235,7 @@ extension MachineView {
     /// rest take the next unused glyph in bar order, so no two share one
     /// until the pool runs out.
     static func symbols(for machines: [MachineView]) -> [MachineID: String] {
-        let pool = ["server.rack", "cloud", "desktopcomputer", "cpu", "externaldrive", "terminal"]
+        let pool = ["cloud", "server.rack", "desktopcomputer", "cpu", "externaldrive", "terminal"]
         var result: [MachineID: String] = [:]
         var next = 0
         for view in machines {
@@ -246,6 +249,15 @@ extension MachineView {
             }
         }
         return result
+    }
+
+    /// The bar's label: "Mac", "WSL", or the machine's own name with a
+    /// capital. Shorter than `displayName`, which reads "This Mac" and keeps
+    /// herdr's lower-case labels for the rows and menus.
+    var shortName: String {
+        if machine.transport.isLocal { return "Mac" }
+        if isWSL { return "WSL" }
+        return machine.displayName.prefix(1).uppercased() + machine.displayName.dropFirst()
     }
 
     private var isWSL: Bool {

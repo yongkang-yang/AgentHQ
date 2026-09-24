@@ -29,6 +29,14 @@ struct MachineSymbolTests {
         #expect(symbols[wsl.id] == "pc")
     }
 
+    @Test("the bar labels machines Mac, WSL, and their own name capitalised")
+    @MainActor
+    func shortNames() {
+        #expect(local.shortName == "Mac")
+        #expect(remote("wsl").shortName == "WSL")
+        #expect(remote("cursor").shortName == "Cursor")
+    }
+
     @Test("two remote machines never share a glyph")
     @MainActor
     func remotesAreDistinct() {
