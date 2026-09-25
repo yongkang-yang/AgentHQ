@@ -420,6 +420,17 @@ public actor MachineSession {
         return text ?? ""
     }
 
+    /// The prompt a waiting agent has on screen now, for the console to pin.
+    ///
+    /// Read live rather than taken from the row. The row's prompt is rebuilt
+    /// only when the agent's state changes, and moving a menu's highlight
+    /// changes nothing herdr reports: ↓ landed, the pinned `❯` stayed on the
+    /// first option, and enter would have taken a row the console was not
+    /// showing.
+    public func prompt(for agentId: AgentID) async throws -> String? {
+        StateClassifier.prompt(in: try await screen(for: agentId, lines: 60))
+    }
+
     /// The agent's own transcript, read on this machine, from `known` on.
     ///
     /// Not through herdr: its socket has no file access, and on an alternate

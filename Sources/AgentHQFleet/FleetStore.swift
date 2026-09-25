@@ -178,6 +178,13 @@ public final class FleetStore {
         return try await session.screen(for: ref.agent)
     }
 
+    /// The prompt a waiting agent has on screen now. See
+    /// `MachineSession.prompt(for:)`.
+    public func prompt(for ref: AgentRef) async throws -> String? {
+        guard let session = sessions[ref.machine] else { throw InterventionError.agentGone }
+        return try await session.prompt(for: ref.agent)
+    }
+
     /// One agent's own transcript, from `known` on. See
     /// `MachineSession.transcript(for:known:)`.
     public func transcript(for ref: AgentRef, known: Int) async throws -> (AgentSessionRef, TranscriptRead)? {

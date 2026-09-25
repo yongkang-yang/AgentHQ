@@ -94,6 +94,9 @@ private struct ConsoleView: View {
     /// The session `transcript` was read from. A new one — `/clear`, a resume
     /// — starts the buffer over rather than appending one file to another.
     @State private var transcriptSession: AgentSessionRef?
+    /// The waiting prompt as the pane shows it now, read alongside the
+    /// transcript. The row's copy goes stale the moment ↑/↓ moves a highlight.
+    @State private var livePrompt: String?
 
     /// The screen, on request. The conversation is the default wherever
     /// there is one; the screen stays a click away because it is the only
@@ -223,16 +226,18 @@ private struct ConsoleView: View {
     /// The transcript has the conversation but not the live prompt: a
     /// highlighted-row menu, an approval footer, a question drawn by the TUI
     /// exists only on the screen. Without it the keys below would be pressed
-    /// blind. It is the prompt the panel row shows, read from the same tail
-    /// the state came from, so the two cannot disagree.
+    /// blind. It is read from the same output the state came from, so the two
+    /// cannot disagree — but it is the whole prompt, not the row's six-line
+    /// excerpt, which cut a four-option question down to its last options and
+    /// lost the `❯` saying which one enter would take.
     @ViewBuilder private var waitingPrompt: some View {
         if let agent, agent.state == .needsApproval || agent.state == .needsInput,
-           let message = agent.message ?? agent.reason {
+           let message = livePrompt ?? agent.prompt ?? agent.message ?? agent.reason {
             HStack(alignment: .top, spacing: 8) {
                 RoundedRectangle(cornerRadius: 2, style: .continuous)
                     .fill(Brand.color(for: agent.state))
                     .frame(width: 3)
-                Text(message)
+                Text(Self.markingHighlight(in: message, color: Brand.color(for: agent.state)))
                     .font(Brand.mono)
                     .textSelection(.enabled)
                     .fixedSize(horizontal: false, vertical: true)
@@ -244,6 +249,27 @@ private struct ConsoleView: View {
                     .fill(Brand.chipFill)
             )
         }
+    }
+
+    /// Emphasize the row a menu has highlighted — the one enter takes.
+    ///
+    /// Keyed on the `❯` the agent itself drew, which moves with ↑/↓; nothing
+    /// is marked where the prompt drew none. A lone `❯` at the start of a line
+    /// only: the same glyph also prefixes the user's echoed message above a
+    /// Claude Code menu, which the prompt block already excludes.
+    static func markingHighlight(in prompt: String, color: Color) -> AttributedString {
+        var text = AttributedString()
+        let lines = prompt.split(separator: "\n", omittingEmptySubsequences: false)
+        for (index, line) in lines.enumerated() {
+            var run = AttributedString(String(line))
+            if line.drop(while: { $0 == " " }).hasPrefix("❯") {
+                run.foregroundColor = color
+                run.inlinePresentationIntent = .stronglyEmphasized
+            }
+            text += run
+            if index < lines.count - 1 { text += AttributedString("\n") }
+        }
+        return text
     }
 
     // MARK: - Input
@@ -334,6 +360,9 @@ private struct ConsoleView: View {
             if state != lastState {
                 pace.reset()
                 lastState = state
+                // A new state is a new prompt, or none; the last one's
+                // highlight says nothing about it.
+                livePrompt = nil
             }
             // A completion shown in an open console has been seen, whether it
             // was there when the window opened or landed while it was open.
@@ -362,7 +391,23 @@ private struct ConsoleView: View {
     /// Whether what the window shows differed from the last read.
     @discardableResult
     private func reload() async -> Bool {
-        isShowingConversation ? await reloadConversation() : await reloadScreen()
+        guard isShowingConversation else { return await reloadScreen() }
+        let conversation = await reloadConversation()
+        let prompt = await reloadPrompt()
+        return conversation || prompt
+    }
+
+    /// Re-read the pinned prompt while the agent waits. The screen view needs
+    /// no such thing: it is the pane, and shows the highlight move by itself.
+    private func reloadPrompt() async -> Bool {
+        guard let state = agent?.state, state == .needsInput || state == .needsApproval else {
+            livePrompt = nil
+            return false
+        }
+        // A failed read keeps the last prompt: the row's copy is older still.
+        guard let read = try? await fleet.prompt(for: ref), read != livePrompt else { return false }
+        livePrompt = read
+        return true
     }
 
     private func reloadConversation() async -> Bool {

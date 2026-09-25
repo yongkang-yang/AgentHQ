@@ -49,6 +49,16 @@ public struct Agent: Sendable, Equatable, Identifiable {
     /// there is nothing worth showing.
     public var message: String?
 
+    /// The whole prompt an agent is waiting on, as the console pins it.
+    ///
+    /// ``message`` is capped for a row, and a menu is routinely longer than
+    /// the cap: a four-option question with descriptions cut to its last six
+    /// lines lost the question, the first two options, and the `❯` on the
+    /// highlighted one — leaving ↑/↓/enter to be pressed without knowing what
+    /// they would move or take. Verbatim, indentation kept. Nil unless the
+    /// agent is waiting on a human.
+    public var prompt: String?
+
     /// When the agent entered its current state. Drives the dwell figure.
     public var stateEnteredAt: Date
 
@@ -84,6 +94,7 @@ public struct Agent: Sendable, Equatable, Identifiable {
         state: AgentState = .unknown,
         reason: String? = nil,
         message: String? = nil,
+        prompt: String? = nil,
         stateEnteredAt: Date = Date(),
         lastActivityAt: Date? = nil,
         actions: AgentActions = .none,
@@ -98,6 +109,7 @@ public struct Agent: Sendable, Equatable, Identifiable {
         self.state = state
         self.reason = reason
         self.message = message
+        self.prompt = prompt
         self.stateEnteredAt = stateEnteredAt
         self.lastActivityAt = lastActivityAt
         self.actions = actions

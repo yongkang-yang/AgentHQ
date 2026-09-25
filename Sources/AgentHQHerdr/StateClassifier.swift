@@ -11,11 +11,17 @@ public struct Classification: Sendable, Equatable {
     /// The lines a row can show when the reason is too short to act on. Nil
     /// when there is nothing worth showing.
     public let message: String?
+    /// The whole prompt a waiting agent drew, for the console to pin. Nil
+    /// unless the agent is waiting on a human.
+    public let prompt: String?
 
-    public init(state: AgentState, reason: String? = nil, message: String? = nil) {
+    public init(
+        state: AgentState, reason: String? = nil, message: String? = nil, prompt: String? = nil
+    ) {
         self.state = state
         self.reason = reason
         self.message = message
+        self.prompt = prompt
     }
 }
 
@@ -98,10 +104,12 @@ public struct StateClassifier: Sendable {
         guard Self.messageStates.contains(result.state),
               let output = recentOutput, !output.isEmpty
         else { return result }
+        let waiting = result.state == .needsInput || result.state == .needsApproval
         return Classification(
             state: result.state,
             reason: result.reason,
-            message: Self.excerpt(Self.tail(of: output))
+            message: Self.excerpt(Self.tail(of: output)),
+            prompt: waiting ? Self.prompt(in: output) : nil
         )
     }
 
@@ -258,6 +266,63 @@ public struct StateClassifier: Sendable {
         }
         return false
     }
+
+    /// The prompt block at the bottom of a waiting pane, verbatim.
+    ///
+    /// Not the row's excerpt: that is capped at ``excerptLines`` and condensed,
+    /// and a Claude Code question — header, question, four options with a
+    /// description each, then "Chat about this" and the key legend — is twice
+    /// that. Cut to six it began at option two's description, with the `❯`
+    /// marking the highlighted row gone, and the console's ↑/↓/enter were
+    /// pressed blind.
+    ///
+    /// The block starts under the lowest rule with a question still below it.
+    /// Lowest alone is wrong: Claude Code draws a second rule *inside* the
+    /// menu, between "Type something." and "Chat about this", and cutting
+    /// there leaves one option and a footer. Where no rule qualifies the whole
+    /// window is shown — more than the prompt, never less. Indentation is kept
+    /// because it is what sets an option apart from its description.
+    public static func prompt(in output: String) -> String? {
+        let lines = strippingANSI(output)
+            .split(separator: "\n", omittingEmptySubsequences: false)
+            .map { String($0).replacingOccurrences(of: #"\s+$"#, with: "", options: .regularExpression) }
+
+        var start = lines.endIndex
+        var counted = 0
+        for index in lines.indices.reversed() where !lines[index].isEmpty {
+            start = index
+            counted += 1
+            if counted == promptLines { break }
+        }
+        var block = Array(lines[start...])
+
+        let questionBelow = { (rule: Int) in
+            block[(rule + 1)...].contains { readsAsAQuestion(condense($0)) }
+        }
+        if let rule = block.indices.last(where: { isRule(block[$0]) && questionBelow($0) }) {
+            block = Array(block[(rule + 1)...])
+        }
+
+        // Rules left inside the block are drawn to the pane's width and would
+        // wrap into rows of dashes; a blank line keeps the separation.
+        var kept: [String] = []
+        for line in block.map({ isRule($0) ? "" : $0 }) {
+            if line.isEmpty, kept.last?.isEmpty ?? true { continue }
+            kept.append(line)
+        }
+        while kept.last?.isEmpty == true { kept.removeLast() }
+        guard kept.contains(where: { !$0.isEmpty }) else { return nil }
+
+        let indent = kept.filter { !$0.isEmpty }
+            .map { $0.prefix(while: { $0 == " " }).count }
+            .min() ?? 0
+        return kept.map { String($0.dropFirst(min(indent, $0.count))) }.joined(separator: "\n")
+    }
+
+    /// How far up a prompt block may reach, in non-empty lines: herdr's own
+    /// widest rule scope, and enough for a four-option question with
+    /// descriptions.
+    static let promptLines = 20
 
     static func tail(of output: String) -> [String] {
         let lines = strippingANSI(output)
@@ -448,6 +513,7 @@ public extension HerdrSnapshot {
                 state: classification.state,
                 reason: classification.reason,
                 message: classification.message,
+                prompt: classification.prompt,
                 stateEnteredAt: now,
                 lastActivityAt: nil,
                 // Derived from the same output the state came from, so the

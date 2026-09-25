@@ -286,8 +286,10 @@ design discussion, not a refactor.
       the screen one click away. The live prompt exists only on the screen —
       a highlighted-row menu is answered by looking at it — so the screen is
       not removable, and while the agent waits its prompt is also pinned
-      above the input: the row's own `message`, from the same tail as the
-      state. An agent with no reader gets the screen only, not a guessed
+      above the input: the whole prompt block (`Agent.prompt`), from the same
+      output as the state — not the row's six-line `message`, which cut a
+      four-option menu to its last options and lost the `❯` saying which one
+      enter takes. An agent with no reader gets the screen only, not a guessed
       transcript.
 
     herdr pushes nothing when a pane's output changes — `pane_updated` is
