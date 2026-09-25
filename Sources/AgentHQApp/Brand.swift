@@ -9,118 +9,78 @@ import SwiftUI
 enum Brand {
     // MARK: Status
 
-    /// Nine states, seven colours. Colour narrows the category; the pill label
-    /// names the state. Past about six hues they stop being distinguishable at
-    /// 8pt, so the text is load-bearing by design rather than by accident.
-    static func color(for state: AgentState) -> Color {
+    /// Six hues, one per thing a glance has to tell apart, and they are the
+    /// only saturated colours in the app. Everything a user presses, and every
+    /// piece of chrome, is neutral — so a colour on screen always means a
+    /// state, and the eye can take in the herd without reading a word.
+    ///
+    /// Grouped by what the user does next, not by cause:
+    ///
+    /// - **Needs you** — amber. The call to action.
+    /// - **Broken** — red. Crashed, tests failed, merge conflict: something
+    ///   went wrong and wants looking at. Their glyphs and pill words separate
+    ///   them; three neighbouring warm hues did not, at 8pt.
+    /// - **Stalled** — violet. Rate limited: attention, but nothing to press.
+    /// - **Working** — blue.
+    /// - **Finished** — green. It used to be a second blue beside working's
+    ///   navy, and the two were one colour at a glance.
+    /// - **Quiet** — grey. Idle or unknown: nothing to act on.
+    ///
+    /// Each pair holds 4.5:1 as text on the panel and as a pill fill under
+    /// ``onStateText``, in its own appearance — see `PaletteTests`.
+    static func statePair(for state: AgentState) -> (light: UInt32, dark: UInt32) {
         switch state {
-        case .crashed:
-            return pair(light: 0xB3261E, dark: 0xFF6B6B)      // alarm
-        case .needsApproval, .needsInput:
-            return pair(light: 0x8A5A00, dark: 0xFFC94D)      // needs you
-        case .ciFailed, .mergeConflict:
-            return pair(light: 0x9A3412, dark: 0xF59E5B)      // failure
-        case .rateLimited:
-            // The one cool colour in the attention group: this is the only
-            // attention state the user cannot clear by acting, so it should
-            // read as "stalled", not "do something".
-            return pair(light: 0x00625E, dark: 0x5ED4CE)
-        case .finished:
-            return pair(light: 0x1E4BD2, dark: 0x6CA6FF)
-        case .working:
-            return pair(light: 0x1A3A69, dark: 0x8BADDC)
-        case .idle, .unknown:
-            // One grey for "nothing to act on". Splitting it would be an
-            // eighth hue, and DESIGN.md's own limit is that past about six
-            // they stop being distinguishable at 8pt — the pill label is what
-            // separates these two.
-            return pair(light: 0x5F666B, dark: 0x929A9F)
+        case .needsApproval, .needsInput:           return (0x8A5A00, 0xFBBF24)
+        case .crashed, .ciFailed, .mergeConflict:   return (0xC62828, 0xFF7B72)
+        case .rateLimited:                          return (0x6D28D9, 0xB69CFF)
+        case .working:                              return (0x1D4ED8, 0x6AA8FF)
+        case .finished:                             return (0x137333, 0x4ADE80)
+        case .idle, .unknown:                       return (0x5F666B, 0x9BA3A8)
         }
+    }
+
+    static func color(for state: AgentState) -> Color {
+        let (light, dark) = statePair(for: state)
+        return pair(light: light, dark: dark)
     }
 
     /// Text on a solid state pill. White on the light-mode state colours,
     /// near-black on the dark-mode ones: those are lifted for legibility as
     /// text on a dark panel, which makes them too light to carry white.
-    static let onStateText = pair(light: 0xFFFFFF, dark: 0x111315)
+    static let onStateTextPair: (light: UInt32, dark: UInt32) = (0xFFFFFF, 0x111315)
+    static let onStateText = pair(onStateTextPair)
 
-    /// Machine-level trouble. Never borrows an agent colour — a dropped tunnel
-    /// is not a dead agent.
-    static let machineDown = pair(light: 0xC2410C, dark: 0xFFA726)
+    // MARK: Neutrals
 
-    // MARK: Machines
+    /// The one grey vocabulary for secondary text. Replaces system
+    /// `.secondary`/`.tertiary`, which fall to ~3.5:1 and ~2.2:1 on small
+    /// light-mode text.
+    static let secondaryTextPair: (light: UInt32, dark: UInt32) = (0x5A5F64, 0xB3B8BD)
+    static let secondaryText = pair(secondaryTextPair)
 
-    /// Identity colours for machines, one chip per box.
-    ///
-    /// A machine is a second axis, so these are deliberately not the state
-    /// palette: a chip that shared a hue with a state pill would read as
-    /// status, which is the Separate Axis Rule. Fixed rather than adaptive
-    /// because they are only ever used as a wash under primary text, which
-    /// reads the same over any of them.
-    static let machinePalette: [Color] = [
-        Color(nsColor: NSColor(hex: 0x1D4ED8)), // blue
-        Color(nsColor: NSColor(hex: 0x6D28D9)), // violet
-        Color(nsColor: NSColor(hex: 0x0F766E)), // teal
-        Color(nsColor: NSColor(hex: 0xB45309)), // amber
-        Color(nsColor: NSColor(hex: 0xA21CAF)), // fuchsia
-        Color(nsColor: NSColor(hex: 0x0E7490)), // cyan
-        Color(nsColor: NSColor(hex: 0x475569)), // slate
-        Color(nsColor: NSColor(hex: 0xBE123C)), // rose
-        Color(nsColor: NSColor(hex: 0x15803D)), // green
-        Color(nsColor: NSColor(hex: 0x78350F)), // brown
-    ]
+    /// A button's label. Primary text, not a hue: a coloured End or Reveal
+    /// read as a state sitting beside the real one.
+    static let actionText = Color.primary
 
-    static func machineColor(for id: MachineID) -> Color {
-        machinePalette[machineColorIndex(for: id)]
-    }
+    /// The committing button — Approve, End it. An inverted neutral: near-black
+    /// in light mode, near-white in dark, with its label the other way round.
+    /// It stands out by weight, which a hue could only do by borrowing a
+    /// state's meaning.
+    static let prominentFillPair: (light: UInt32, dark: UInt32) = (0x242424, 0xE8E8E8)
+    static let prominentFill = pair(prominentFillPair)
+    static let onProminentText = pair(light: 0xFFFFFF, dark: 0x111315)
 
-    /// Stable across launches: `hashValue` is seeded per process, so an id
-    /// hashed with it would wear a different chip every time the app restarts.
-    static func machineColorIndex(for id: MachineID) -> Int {
-        stableIndex(id.raw, modulo: machinePalette.count)
-    }
+    /// Something the user should read that is not an agent's state: a machine
+    /// that cannot be reached, a refused click, a herdr error. Primary text
+    /// behind a warning glyph — see ``ProblemText`` — never a hue. A machine
+    /// going dark in red is what the Separate Axis Rule exists to prevent,
+    /// and orange was one step from Needs-you amber.
+    static let problemText = Color.primary
+    static let problemSymbol = "exclamationmark.triangle.fill"
 
-    // MARK: Menu bar
-
-    /// FNV-1a with the splitmix64 finalizer.
-    ///
-    /// FNV alone clusters in its low bits for short, similar strings — three
-    /// real machine ids all landed on the same chip — and the finalizer spreads
-    /// them before the modulo.
-    static func stableIndex(_ value: String, modulo: Int) -> Int {
-        var hash: UInt64 = 0xcbf2_9ce4_8422_2325
-        for byte in value.utf8 {
-            hash ^= UInt64(byte)
-            hash = hash &* 0x0000_0100_0000_01b3
-        }
-        hash ^= hash >> 33
-        hash = hash &* 0xff51_afd7_ed55_8ccd
-        hash ^= hash >> 33
-        hash = hash &* 0xc4ce_b9fe_1a85_ec53
-        hash ^= hash >> 33
-        return Int(hash % UInt64(modulo))
-    }
-
-    static let accent = pair(light: 0x8A5A00, dark: 0xFFC94D)
-
-    /// Label colours for the row's three standing actions, so each reads by
-    /// colour before its word: End red, Continue/Nudge green, Reveal orange.
-    ///
-    /// Their own tokens rather than borrowed state or machine colours. End in
-    /// Machine Down orange said "tunnel trouble"; Reveal in it would say the
-    /// same. Each pair holds AA as text on the panel in its appearance,
-    /// which system `.green` and `.orange` do not in light mode.
-    static let endAction = pair(light: 0xB91C1C, dark: 0xF87171)
-    static let continueAction = pair(light: 0x15803D, dark: 0x4ADE80)
-    static let revealAction = pair(light: 0xC2410C, dark: 0xFB923C)
-
-    /// Fills for a prominent glass button. Fixed rather than adaptive, like the
-    /// machine chips: the label on them is white in both appearances, and the
-    /// dark-mode state colours are light enough that white text on them fails
-    /// AA. Approve Fill navy lifted a step so it still reads as a button on a
-    /// dark panel, and the light-mode Alarm red.
-    static let prominentFill = Color(nsColor: NSColor(hex: 0x1E4BD2))
-    static let destructiveFill = Color(nsColor: NSColor(hex: 0xB3261E))
-    static let secondaryText = pair(light: 0x5A5F64, dark: 0xB3B8BD)
+    /// Chrome washes: machine chips, the row card, the console's screen.
+    static let chipFill = Color.primary.opacity(0.07)
+    static let chipStroke = Color.primary.opacity(0.14)
 
     // MARK: Labels
 
@@ -211,6 +171,10 @@ enum Brand {
     static let insetRadius: CGFloat = 8
 
     // MARK: Helpers
+
+    private static func pair(_ hex: (light: UInt32, dark: UInt32)) -> Color {
+        pair(light: hex.light, dark: hex.dark)
+    }
 
     private static func pair(light: UInt32, dark: UInt32) -> Color {
         Color(nsColor: NSColor(name: nil) { appearance in

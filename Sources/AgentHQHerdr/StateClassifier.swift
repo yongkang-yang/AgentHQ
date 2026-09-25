@@ -454,7 +454,8 @@ public extension HerdrSnapshot {
                 // buttons on a row and the pill on it can never disagree about
                 // which prompt they are describing.
                 actions: affordances.actions(for: classification.state, recentOutput: recent),
-                stateSeq: view?.stateChangeSeq
+                stateSeq: view?.stateChangeSeq,
+                session: pane.agentSession
             )
         }
     }

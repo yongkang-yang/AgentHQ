@@ -148,12 +148,18 @@ struct PanelView: View {
         // Under the header rather than in it: a failure here is a sentence
         // (usually the Automation grant), and the header has no room for one.
         if let headerNote {
-            Text(headerNote.text)
-                .font(Brand.sectionLabel)
-                .foregroundStyle(headerNote.isFailure ? Brand.machineDown : Brand.secondaryText)
-                .fixedSize(horizontal: false, vertical: true)
-                .padding(.horizontal, 14)
-                .padding(.bottom, 4)
+            Group {
+                if headerNote.isFailure {
+                    ProblemText(headerNote.text)
+                } else {
+                    Text(headerNote.text)
+                        .font(Brand.sectionLabel)
+                        .foregroundStyle(Brand.secondaryText)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .padding(.horizontal, 14)
+            .padding(.bottom, 4)
         }
     }
 
@@ -196,18 +202,24 @@ private struct MachineBar: View {
         HStack(spacing: 4) {
             Image(systemName: symbol)
                 .font(.system(size: 12))
-                .foregroundStyle(isTroubled ? view.dotColor : Brand.secondaryText)
+                .foregroundStyle(isTroubled ? Brand.problemText : Brand.secondaryText)
             if isTroubled {
+                if view.isDown {
+                    Image(systemName: Brand.problemSymbol).font(.system(size: 9))
+                }
                 Text("\(view.shortName) \(view.shortStatus)")
                     .font(Brand.sectionLabel)
-                    .foregroundStyle(view.isDown ? Brand.machineDown : Brand.secondaryText)
+                    .foregroundStyle(view.isDown ? Brand.problemText : Brand.secondaryText)
                     .lineLimit(1)
                 if view.canRetry {
                     // Rather than waiting out a reconnect cycle while
-                    // looking at a machine you know is back.
+                    // looking at a machine you know is back. Plain text, not
+                    // a link: link blue is working's blue.
                     Button("Retry") { fleet.retry(view.machine.id) }
-                        .font(Brand.sectionLabel)
-                        .buttonStyle(.link)
+                        .font(Brand.sectionLabel.weight(.bold))
+                        .foregroundStyle(Brand.actionText)
+                        .buttonStyle(.plain)
+                        .underline()
                 }
             } else {
                 Text(view.shortName)
@@ -221,12 +233,13 @@ private struct MachineBar: View {
                     .foregroundStyle(Brand.secondaryText)
             }
         }
-        // The same wash as the machine's chip on every agent row, so the
-        // foot of the panel and the rows above it sort by the same colour.
+        // The same neutral wash as the machine chip on every agent row.
+        // Machines are told apart by glyph and name; a hue per machine put a
+        // red "wsl" beside a red "crashed".
         .padding(.horizontal, 7)
         .padding(.vertical, 2)
-        .background(Capsule().fill(Brand.machineColor(for: view.machine.id).opacity(0.2)))
-        .overlay(Capsule().strokeBorder(Brand.machineColor(for: view.machine.id).opacity(0.45), lineWidth: 0.5))
+        .background(Capsule().fill(Brand.chipFill))
+        .overlay(Capsule().strokeBorder(Brand.chipStroke, lineWidth: 0.5))
         .opacity(view.machine.isEnabled ? 1 : 0.45)
         .help(view.tooltip)
     }
@@ -283,12 +296,6 @@ extension MachineView {
     var isDown: Bool {
         if case .unreachable = reachability { return true }
         return false
-    }
-
-    var dotColor: Color {
-        if reachability.isConnected { return Brand.color(for: .working) }
-        if isDown { return Brand.machineDown }
-        return Brand.secondaryText
     }
 
     /// The one-word form for a line with no room. Never the failure's reason,
@@ -411,10 +418,8 @@ private struct AgentRow: View {
                         .padding(.vertical, 2.5)
                         .background(Capsule().fill(Brand.color(for: agent.state)))
                     // The machine is on every row, in mono: in a fleet, which
-                    // box this is on is part of the agent's identity. The chip
-                    // gives each machine its own colour so the eye can sort a
-                    // mixed list by box without reading a word.
-                    MachineTag(name: machineName, id: agent.ref.machine)
+                    // box this is on is part of the agent's identity.
+                    MachineTag(name: machineName)
                     // The model is the one thing that separates two same
                     // provider rows on one machine. Shown only when a reporter
                     // named it; herdr has no model field to fall back on.
@@ -472,12 +477,12 @@ private struct AgentRow: View {
         if available != .none || failure != nil || agent.state != .crashed {
             GlassCluster {
                 if let key = available.approveKey {
-                    ActionButton(title: "Approve (\(key))", tint: Brand.color(for: .working), emphasis: .prominent) {
+                    ActionButton(title: "Approve (\(key))", emphasis: .prominent) {
                         run(.approve)
                     }
                 }
                 if let key = available.denyKey {
-                    ActionButton(title: "Decline (\(key))", tint: Brand.secondaryText) {
+                    ActionButton(title: "Decline (\(key))") {
                         run(.deny)
                     }
                 }
@@ -487,7 +492,7 @@ private struct AgentRow: View {
                     // cannot get back, and the panel is a list of
                     // near-identical rows with the buttons in the same place
                     // on each — so the confirmation names the row.
-                    ActionButton(title: "End", tint: Brand.endAction) {
+                    ActionButton(title: "End") {
                         pendingEnd.toggle()
                     }
                 }
@@ -496,7 +501,7 @@ private struct AgentRow: View {
                     // live on the row; each was a guess at the pane from a
                     // snapshot, and the console shows the pane itself. What
                     // stays on the row is what is safe to press unseen.
-                    ActionButton(title: "Console", tint: Brand.accent) {
+                    ActionButton(title: "Console") {
                         ConsoleWindows.shared.open(
                             agent.ref,
                             title: "\(agent.provider) · \(agent.project) · \(machineName)",
@@ -510,7 +515,7 @@ private struct AgentRow: View {
                     // No machine name in the title: the chip on the row
                     // already says which box, and "Reveal on wsl" made the
                     // same button a different width on every row.
-                    ActionButton(title: "Reveal", tint: Brand.revealAction) { reveal() }
+                    ActionButton(title: "Reveal") { reveal() }
                         .help("Show this pane in Ghostty on \(machineName)")
                 }
                 Spacer(minLength: 0)
@@ -530,11 +535,11 @@ private struct AgentRow: View {
                     Text("End \(agent.provider) in \(agent.project) on \(machineName)?")
                         .font(Brand.sectionLabel)
                         .foregroundStyle(Brand.secondaryText)
-                    ActionButton(title: "End it", tint: Brand.machineDown, emphasis: .destructive) {
+                    ActionButton(title: "End it", emphasis: .prominent) {
                         pendingEnd = false
                         run(.end, note: "Asked \(agent.provider) to exit.")
                     }
-                    ActionButton(title: "Cancel", tint: Brand.secondaryText) {
+                    ActionButton(title: "Cancel") {
                         pendingEnd = false
                     }
                     Spacer(minLength: 0)
@@ -549,10 +554,7 @@ private struct AgentRow: View {
             // the next attempt: a refusal that vanishes on the next refresh
             // reads as the click having worked.
             if let failure {
-                Text(failure)
-                    .font(Brand.sectionLabel)
-                    .foregroundStyle(Brand.machineDown)
-                    .fixedSize(horizontal: false, vertical: true)
+                ProblemText(failure)
                     .padding(.top, 1)
             } else if let revealNote {
                 Text(revealNote)
@@ -796,29 +798,25 @@ private struct ListHeightKey: PreferenceKey {
     }
 }
 
-/// A machine's identity as a tinted chip.
+/// A machine's identity as a neutral chip.
 ///
-/// A wash, where the state pill is solid. The two sit on the same row and the
-/// difference in weight is what keeps "which box" from reading as "what
-/// state". It used to be the other way round, and a saturated chip per row
-/// out-shouted the state it sat beside — the machine is context, the state is
-/// the news. The colour is stable per machine, so the same box is the same
-/// chip every launch.
+/// A grey wash, where the state pill is solid colour. The two sit on the same
+/// row and the difference is what keeps "which box" from reading as "what
+/// state". It was a hue per machine once, first saturated and then as a
+/// wash, and either way a chip that shared a hue with a state read as one —
+/// the machine is context, the state is the news.
 private struct MachineTag: View {
     let name: String
-    let id: MachineID
 
     var body: some View {
         Text(name)
             .font(Brand.mono)
-            // Primary text, not the machine colour: the palette is dark by
-            // design, and dark text on a dark panel fails AA.
             .foregroundStyle(.primary)
             .lineLimit(1)
             .padding(.horizontal, 6)
             .padding(.vertical, 1.5)
-            .background(Capsule().fill(Brand.machineColor(for: id).opacity(0.2)))
-            .overlay(Capsule().strokeBorder(Brand.machineColor(for: id).opacity(0.45), lineWidth: 0.5))
+            .background(Capsule().fill(Brand.chipFill))
+            .overlay(Capsule().strokeBorder(Brand.chipStroke, lineWidth: 0.5))
             .help(name)
     }
 }

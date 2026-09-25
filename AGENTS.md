@@ -8,7 +8,8 @@ on the ones above it:
 - `Sources/AgentHQKit/` — domain model. **No I/O.** If a type here needs a
   socket, a file, or a clock it cannot control, it belongs in another target.
 - `Sources/AgentHQTransport/` — `LocalSocketTransport` and `SSHTunnel`. Both
-  resolve to a local unix socket path.
+  resolve to a local unix socket path. Plus `MachineShell`, the one other way
+  onto a machine: a short script in, bytes out (invariant 14).
 - `Sources/AgentHQHerdr/` — the herdr wire protocol. Knows one socket path.
   Must stay ignorant of machines, SSH, and the fleet.
 - `Sources/AgentHQFleet/` — `MachineSession` per machine, plus `FleetStore`.
@@ -262,6 +263,51 @@ design discussion, not a refactor.
       twenty seconds, and a `stop` or a second rebuild can land inside that
       window; the attempt that finishes second must not install its client
       over the decision that overtook it.
+
+14. **An agent's transcript is read from the agent's own file, never
+    reconstructed from its terminal.** On the alternate screen — Claude Code in
+    fullscreen — `pane.read` is one screenful (58 rows for 400 asked, herdr
+    0.9.1), and herdr's socket cannot read files. So the console reads the
+    session the agent's herdr integration reported in `agent_session`,
+    through `MachineShell`: `/bin/sh` here, `ssh` to the tunnel's own
+    destination elsewhere, so this Mac stays the degenerate case.
+
+    - Where each agent keeps it, measured: claude `id` →
+      `~/.claude/projects/*/<id>.jsonl`; codex `id` →
+      `~/.codex/sessions/*/*/*/rollout-*-<id>.jsonl`; pi reports the `path`;
+      opencode `id` → rows in `~/.local/share/opencode/opencode.db`, read with
+      `sqlite3` or, where a host has none (stock WSL Ubuntu), `python3`.
+    - `agent_session.value` came from a herdr server and goes into a shell
+      script. An id must be `[A-Za-z0-9_-]`, a path an absolute `.jsonl` in
+      single quotes; anything else gets no script at all.
+    - Codex is read from `item_completed`, not `response_item`: its injected
+      AGENTS.md arrives in the latter as a *user* message.
+    - The console opens on the transcript for an agent with a reader, with
+      the screen one click away. The live prompt exists only on the screen —
+      a highlighted-row menu is answered by looking at it — so the screen is
+      not removable, and while the agent waits its prompt is also pinned
+      above the input: the row's own `message`, from the same tail as the
+      state. An agent with no reader gets the screen only, not a guessed
+      transcript.
+
+    herdr pushes nothing when a pane's output changes — `pane_updated` is
+    agent state only, and `pane.output_matched` fires once — so the console
+    polls, backing off while nothing moves and stopping while it is hidden.
+
+## Decisions kept on record
+
+**`StateClassifier` does not defer to `agent.explain`.** Measured against
+herdr 0.9.0 by fabricating each case in a throwaway pane: cursor's approval
+prompt comes back `blocked` / `approval_prompt`, but an open question, a merge
+conflict, and a 429 with a retry-after all come back `idle` with no matched
+rule. herdr models none of the states that are ours, so explain could at most
+second-opinion the blocked half — which already arrives free in
+`agent_status`, while `PromptAffordances` also says *which key* answers. One
+more round trip per stopped pane (~115ms across a tunnel) to learn less.
+`explain.matched_rule` stays the upgrade path if approval detection proves
+wrong in practice. What the measurement did change: herdr scopes its rules to
+`bottom_non_empty_lines(n)`, at most 20, so the classifier reads 12 non-empty
+lines — wide enough, and no wider than herdr's own.
 
 ## Style
 

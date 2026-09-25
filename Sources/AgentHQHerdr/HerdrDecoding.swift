@@ -1,3 +1,4 @@
+import AgentHQKit
 import Foundation
 
 /// Decoding for herdr 0.9.0 / protocol 22.
@@ -46,8 +47,21 @@ extension LiveHerdrClient {
             // A metadata value can be null, and a null token means the reporter
             // withdrew it; keeping only strings matches that intent.
             tokens: rawTokens.compactMapValues { $0 as? String },
-            revision: (pane["revision"] as? NSNumber)?.uint64Value ?? 0
+            revision: (pane["revision"] as? NSNumber)?.uint64Value ?? 0,
+            agentSession: decodeAgentSession(pane["agent_session"])
         )
+    }
+
+    /// `{"agent": "claude", "kind": "id" | "path", "value": "…", "source": …}`,
+    /// as herdr 0.9.1 reports it for claude, codex, pi and opencode. An
+    /// unknown kind decodes to nil rather than to a guess.
+    static func decodeAgentSession(_ raw: Any?) -> AgentSessionRef? {
+        guard let session = raw as? [String: Any],
+              let agent = session["agent"] as? String, !agent.isEmpty,
+              let kind = (session["kind"] as? String).flatMap(AgentSessionRef.Kind.init(rawValue:)),
+              let value = session["value"] as? String, !value.isEmpty
+        else { return nil }
+        return AgentSessionRef(agent: agent, kind: kind, value: value)
     }
 
     /// One agent from `agent.list` or `agent.get`.

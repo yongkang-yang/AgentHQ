@@ -16,18 +16,18 @@ import SwiftUI
 
 /// How much a button should stand out from its neighbours.
 enum ActionEmphasis {
-    /// The row's committing action — Approve, Send, Confirm. A filled glass
-    /// capsule in a fixed tone that holds white text in both appearances.
+    /// The committing action — Approve, End it. A filled capsule in the
+    /// inverted neutral, never a hue: see ``Brand/prominentFill``. End it gets
+    /// no red of its own; the staged confirmation that names the row is its
+    /// guard, and red on screen means an agent is broken.
     case prominent
-    /// The committing action for something that cannot be taken back.
-    case destructive
-    /// Everything else: clear glass, the tint carried by the label alone.
+    /// Everything else: clear glass with a neutral label.
     case standard
 }
 
 struct ActionButton: View {
     let title: String
-    let tint: Color
+    var tint: Color = Brand.actionText
     var emphasis: ActionEmphasis = .standard
     let action: () -> Void
 
@@ -43,10 +43,10 @@ struct ActionButton: View {
     @ViewBuilder private var glass: some View {
         let label = Text(title).font(Brand.sectionLabel)
         switch emphasis {
-        case .prominent, .destructive:
-            Button(action: action) { label }
+        case .prominent:
+            Button(action: action) { label.foregroundStyle(Brand.onProminentText) }
                 .buttonStyle(.glassProminent)
-                .tint(emphasis == .destructive ? Brand.destructiveFill : Brand.prominentFill)
+                .tint(Brand.prominentFill)
                 .buttonBorderShape(.capsule)
                 .controlSize(.small)
         case .standard:
@@ -58,13 +58,14 @@ struct ActionButton: View {
     }
 
     private var flat: some View {
-        Button(action: action) {
+        let isProminent = emphasis == .prominent
+        return Button(action: action) {
             Text(title)
                 .font(Brand.sectionLabel)
-                .foregroundStyle(tint)
+                .foregroundStyle(isProminent ? Brand.onProminentText : tint)
                 .padding(.horizontal, 8)
                 .padding(.vertical, 3)
-                .background(Capsule().fill(tint.opacity(0.14)))
+                .background(Capsule().fill(isProminent ? Brand.prominentFill : Brand.chipFill))
         }
         .buttonStyle(.plain)
     }
@@ -100,5 +101,24 @@ extension View {
         } else {
             self
         }
+    }
+}
+
+/// A line the user should read that is not an agent's state — a refused click,
+/// an unreachable machine, a herdr error. See ``Brand/problemText``.
+struct ProblemText: View {
+    let text: String
+
+    init(_ text: String) { self.text = text }
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 4) {
+            Image(systemName: Brand.problemSymbol)
+                .font(.system(size: 9))
+            Text(text)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .font(Brand.sectionLabel)
+        .foregroundStyle(Brand.problemText)
     }
 }

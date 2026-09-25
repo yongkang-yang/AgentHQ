@@ -31,6 +31,7 @@ struct EventDecodingTests {
         // `revision`, not `state_change_seq`. A protocol-17 spelling reads 0.
         #expect(pane.revision == 52)
         #expect(pane.cwd == "/Users/j/dev/AgentHQ")
+        #expect(pane.agentSession == AgentSessionRef(agent: "claude", kind: .id, value: "b3f6779a"))
     }
 
     @Test("focus events are topology, not agent state")
@@ -65,5 +66,19 @@ struct EventDecodingTests {
     func unknownEvent() {
         #expect(decode(#"{"data": {"type": "plugin_did_something"}, "event": "plugin_did_something"}"#) == nil)
         #expect(decode("not json") == nil)
+    }
+
+    @Test("agent_session decodes as herdr 0.9.1 reports it for each agent, and nothing else")
+    func agentSessions() {
+        // pi reports a path; claude, codex and opencode an id. Captured shapes.
+        #expect(LiveHerdrClient.decodeAgentSession(
+            ["source": "herdr:pi", "agent": "pi", "kind": "path", "value": "/home/me/.pi/agent/sessions/--x--/a_b.jsonl"]
+        ) == AgentSessionRef(agent: "pi", kind: .path, value: "/home/me/.pi/agent/sessions/--x--/a_b.jsonl"))
+        #expect(LiveHerdrClient.decodeAgentSession(
+            ["source": "herdr:opencode", "agent": "opencode", "kind": "id", "value": "ses_f986869caffeL20Kbkwcw9nJ4l"]
+        )?.format == .opencode)
+        // A kind herdr has not been seen to send is not guessed into one.
+        #expect(LiveHerdrClient.decodeAgentSession(["agent": "claude", "kind": "url", "value": "x"]) == nil)
+        #expect(LiveHerdrClient.decodeAgentSession(nil) == nil)
     }
 }

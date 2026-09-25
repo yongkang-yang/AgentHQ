@@ -70,6 +70,11 @@ public struct Agent: Sendable, Equatable, Identifiable {
     /// without it rather than proceeding unguarded.
     public var stateSeq: UInt64?
 
+    /// Where the agent keeps its own transcript, when its herdr integration
+    /// reported it. What lets the console show the conversation where the
+    /// terminal shows only one screen.
+    public var session: AgentSessionRef?
+
     public init(
         ref: AgentRef,
         provider: String,
@@ -82,7 +87,8 @@ public struct Agent: Sendable, Equatable, Identifiable {
         stateEnteredAt: Date = Date(),
         lastActivityAt: Date? = nil,
         actions: AgentActions = .none,
-        stateSeq: UInt64? = nil
+        stateSeq: UInt64? = nil,
+        session: AgentSessionRef? = nil
     ) {
         self.ref = ref
         self.provider = provider
@@ -96,6 +102,7 @@ public struct Agent: Sendable, Equatable, Identifiable {
         self.lastActivityAt = lastActivityAt
         self.actions = actions
         self.stateSeq = stateSeq
+        self.session = session
     }
 
     /// How long the agent has been in its current state.

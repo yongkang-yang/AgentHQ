@@ -34,6 +34,9 @@ public struct HerdrPane: Sendable, Equatable {
     /// to know whether an agent moved must read ``HerdrAgentInfo`` instead;
     /// this field is kept only so the pane record decodes completely.
     public let revision: UInt64
+    /// `agent_session`: the agent's own transcript, as its integration
+    /// reported it. On pane records only; see ``AgentSessionRef``.
+    public let agentSession: AgentSessionRef?
 
     public init(
         paneId: String,
@@ -44,7 +47,8 @@ public struct HerdrPane: Sendable, Equatable {
         title: String?,
         cwd: String?,
         tokens: [String: String] = [:],
-        revision: UInt64
+        revision: UInt64,
+        agentSession: AgentSessionRef? = nil
     ) {
         self.paneId = paneId
         self.workspaceId = workspaceId
@@ -55,6 +59,7 @@ public struct HerdrPane: Sendable, Equatable {
         self.cwd = cwd
         self.tokens = tokens
         self.revision = revision
+        self.agentSession = agentSession
     }
 
     /// The model this pane's agent is running, when a reporter named one.

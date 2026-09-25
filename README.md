@@ -18,11 +18,13 @@ agents stay visible but secondary.
 
 Status: **working.** It builds as a menu-bar app, imports machines from
 herdr's own registry, tunnels to them over SSH, classifies what each agent is
-waiting on, and can answer, decline, reply, nudge, reveal or end one from the
-panel. It notifies when an agent needs you, when a run finishes — with what
-the run actually said — and when a machine stops answering. Machines that go
-down recover on their own. Verified end to end against a local herdr and a
-WSL host over Tailscale.
+waiting on, and can approve, decline, reveal or end one from the panel. Each
+agent also has a console window that types into it and shows the agent's own
+transcript — for Claude Code, Codex, pi and opencode — with whatever prompt it
+is waiting on pinned above the input, and the mirrored pane one click away.
+Any other agent's console mirrors its pane. It notifies when an agent needs you, when a run finishes, and when a
+machine stops answering. Machines that go down recover on their own. Verified
+end to end against a local herdr and a WSL host over Tailscale.
 
 `ssh -L` unix-socket forwarding is verified against a WSL2 host over
 Tailscale: usable 0.3s after launch, two concurrent connections served

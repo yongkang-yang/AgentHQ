@@ -178,6 +178,13 @@ public final class FleetStore {
         return try await session.screen(for: ref.agent)
     }
 
+    /// One agent's own transcript, from `known` on. See
+    /// `MachineSession.transcript(for:known:)`.
+    public func transcript(for ref: AgentRef, known: Int) async throws -> (AgentSessionRef, TranscriptRead)? {
+        guard let session = sessions[ref.machine] else { throw InterventionError.agentGone }
+        return try await session.transcript(for: ref.agent, known: known)
+    }
+
     /// Press keys in one pane from the console window. Routed by machine for
     /// the same reason interventions are.
     public func press(_ keys: [String], in ref: AgentRef) async throws {

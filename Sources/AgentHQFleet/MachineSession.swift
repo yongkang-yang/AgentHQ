@@ -420,6 +420,31 @@ public actor MachineSession {
         return text ?? ""
     }
 
+    /// The agent's own transcript, read on this machine, from `known` on.
+    ///
+    /// Not through herdr: its socket has no file access, and on an alternate
+    /// screen `pane.read` is one screenful. So it goes through
+    /// ``MachineShell`` to the file the agent's integration named — the
+    /// session stamped on the row now, not the one the console opened with,
+    /// since `/clear` or a resume starts a new one.
+    ///
+    /// Throws ``InterventionError/agentGone`` for a row that is no longer
+    /// listed. Returns nil for a session there is no reader for, or whose
+    /// reported value is not safe to put in a script.
+    public func transcript(for agentId: AgentID, known: Int) async throws -> (AgentSessionRef, TranscriptRead)? {
+        guard let agent = agents.first(where: { $0.ref.agent == agentId }) else {
+            throw InterventionError.agentGone
+        }
+        guard let session = agent.session,
+              let script = TranscriptScript.script(for: session, known: known)
+        else { return nil }
+        let output = try await MachineShell(transport: machine.transport).run(script)
+        guard let read = TranscriptRead(output: output) else {
+            throw TranscriptError.unreadable(String(decoding: output.prefix(200), as: UTF8.self))
+        }
+        return (session, read)
+    }
+
     /// Press keys in a pane from the console window.
     ///
     /// Deliberately outside `perform`'s staleness guard. The guard exists
