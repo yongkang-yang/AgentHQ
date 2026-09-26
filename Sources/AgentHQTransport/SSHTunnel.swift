@@ -60,10 +60,7 @@ public actor SSHTunnel: Transport {
     }
 
     public func deactivate() async {
-        if let process, process.isRunning {
-            process.terminate()
-            process.waitUntilExit()
-        }
+        await process?.terminateAndWait()
         process = nil
         stderr = nil
         // ssh removes the socket on a clean exit; on a kill it does not, and

@@ -66,7 +66,7 @@ public enum HerdrSocketLayout {
 
         let data = output.fileHandleForReading.readDataToEndOfFile()
         let errorData = errors.fileHandleForReading.readDataToEndOfFile()
-        process.waitUntilExit()
+        await process.exited()
 
         let path = String(decoding: data, as: UTF8.self)
             .trimmingCharacters(in: .whitespacesAndNewlines)

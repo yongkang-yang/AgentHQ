@@ -105,7 +105,7 @@ public struct MachineShell: Sendable {
                 }
                 let data = output.fileHandleForReading.readDataToEndOfFile()
                 group.wait()
-                process.waitUntilExit()
+                process.blockUntilExited()
                 let errorData = stderrBytes.withLock { $0 }
 
                 guard process.terminationStatus == 0 else {

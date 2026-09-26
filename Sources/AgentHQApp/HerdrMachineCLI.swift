@@ -1,3 +1,4 @@
+import AgentHQTransport
 import Foundation
 
 /// `herdr machine`, for the changes to herdr's saved machines that herdr
@@ -35,7 +36,7 @@ enum HerdrMachineCLI {
             process.standardError = errors
             process.standardOutput = FileHandle.nullDevice
             try process.run()
-            process.waitUntilExit()
+            process.blockUntilExited()
             guard process.terminationStatus == 0 else {
                 let message = String(
                     decoding: errors.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self

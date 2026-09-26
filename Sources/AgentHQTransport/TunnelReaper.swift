@@ -104,7 +104,7 @@ public enum TunnelReaper {
         process.standardError = FileHandle.nullDevice
         guard (try? process.run()) != nil else { return "" }
         let data = pipe.fileHandleForReading.readDataToEndOfFile()
-        process.waitUntilExit()
+        process.blockUntilExited()
         return String(decoding: data, as: UTF8.self)
     }
 }
