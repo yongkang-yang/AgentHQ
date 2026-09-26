@@ -346,7 +346,7 @@ private struct ConsoleView: View {
     ///
     /// A poll, because herdr has nothing to push: measured against 0.9.1, a
     /// pane writing a line every half second raised no `pane_updated` at all
-    /// (that event is agent state only), and `pane.output_matched` fires once
+    /// (no event carries output), and `pane.output_matched` fires once
     /// on its first match and never again. So the console asks — and a read
     /// is one request on one connection (invariant 5), ~115ms through a
     /// tunnel, per open console — which is why it backs off while nothing
