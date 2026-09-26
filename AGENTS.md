@@ -100,8 +100,8 @@ design discussion, not a refactor.
    `MachineSession` fetches the agent view whenever a pane's state disagrees
    with the list — not only when the pane has stopped. Fetching only for
    stopped panes left an agent that had just *started* working with no stamp
-   until the next full resync, so Stop and Nudge refused for that entire
-   window, which is the only window anyone wants either of them in. The
+   until the next full resync, so Approve and Deny refused for that entire
+   window, which is exactly when a freshly blocked agent needs answering. The
    condition is a state *change*, not an event, which is what keeps it
    affordable: a chatty working agent's output events carry the status it
    already has and cost nothing.
@@ -292,9 +292,8 @@ design discussion, not a refactor.
       enter takes. An agent with no reader gets the screen only, not a guessed
       transcript.
 
-    herdr pushes nothing when a pane's output changes — `pane_updated` is
-    agent state only, and `pane.output_matched` fires once — so the console
-    polls, backing off while nothing moves and stopping while it is hidden.
+    herdr pushes nothing when a pane's output changes — no event carries
+    output, and `pane.output_matched` fires once — so the console polls, backing off while nothing moves and stopping while it is hidden.
 
 15. **`pane_updated` is not an agent-state signal.
     `pane.agent_status_changed` is.** `pane_updated` follows the pane's
