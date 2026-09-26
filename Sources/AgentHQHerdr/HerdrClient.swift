@@ -78,6 +78,16 @@ public struct HerdrPane: Sendable, Equatable {
         }
         return nil
     }
+
+    /// This pane with a new agent status, for a `pane.agent_status_changed`
+    /// event that carries the status and nothing else of the record.
+    public func with(agentStatus: String) -> HerdrPane {
+        HerdrPane(
+            paneId: paneId, workspaceId: workspaceId, tabId: tabId,
+            agentStatus: agentStatus, agent: agent, title: title, cwd: cwd,
+            tokens: tokens, revision: revision, agentSession: agentSession
+        )
+    }
 }
 
 // MARK: - HerdrAgentInfo
@@ -144,6 +154,9 @@ public struct HerdrSnapshot: Sendable, Equatable {
 public enum HerdrEvent: Sendable, Equatable {
     case paneUpdated(HerdrPane)
     case paneClosed(paneId: String)
+    /// `pane.agent_status_changed`: the status alone, in the pane record's
+    /// vocabulary. See ``HerdrClient/watchAgentStatus(paneIds:)``.
+    case agentStatusChanged(paneId: String, status: String)
     /// Labels changed; the caller should resnapshot rather than patch.
     case topologyChanged
     case connected
@@ -213,9 +226,27 @@ public protocol HerdrClient: Sendable {
     /// and tab holding it, or focusing the pane alone leaves it on a workspace
     /// nobody is looking at.
     func focusPane(paneId: String) async throws
+
+    /// Subscribe to `pane.agent_status_changed` for exactly these panes.
+    ///
+    /// `pane_updated` cannot be relied on for agent state. It follows the
+    /// pane's `revision`, which an attached client's rendering drives, not the
+    /// agent's state. Measured against herdr 0.9.1 with no client attached —
+    /// every Ghostty window closed — a claude turn pushed `pane_updated` for
+    /// `working` and nothing at all for the return to `idle`, while
+    /// `agent.list` flipped at once. The row sat on Working until something
+    /// else resynced. `pane.agent_status_changed` fired for both transitions,
+    /// with or without a client.
+    ///
+    /// It needs a `pane_id` — herdr rejects it without one — so it cannot be a
+    /// global subscription, and the caller keeps the set current.
+    func watchAgentStatus(paneIds: Set<String>) async
 }
 
 public extension HerdrClient {
+    /// A client with no live subscription has nothing to watch with.
+    func watchAgentStatus(paneIds: Set<String>) async {}
+
     /// The classifier's read: the wrapped tail, which is the shape its rules
     /// were written against.
     func readPane(paneId: String, lines: Int) async throws -> String? {

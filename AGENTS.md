@@ -296,6 +296,33 @@ design discussion, not a refactor.
     agent state only, and `pane.output_matched` fires once — so the console
     polls, backing off while nothing moves and stopping while it is hidden.
 
+15. **`pane_updated` is not an agent-state signal.
+    `pane.agent_status_changed` is.** `pane_updated` follows the pane's
+    `revision`, which an attached client's rendering drives. Measured against
+    herdr 0.9.1 in a session with no client attached — every Ghostty window
+    closed — a claude turn pushed `pane_updated` for `working` and **nothing**
+    for the return to `idle`, while `agent.list` flipped at once. The row sat
+    on Working, never became Completed, and the console showed the same.
+    With a client attached it mostly worked, by accident, and not reliably:
+    one run's `idle` arrived five seconds late and its `working` never came.
+
+    `pane.agent_status_changed` fired for both transitions, with and without
+    a client. It is dotted on the wire, unlike every other event name, and it
+    carries the status alone. Two constraints shape how it is used:
+
+    - It requires a `pane_id` (`missing field pane_id` without one), so it
+      cannot be a global subscription. `MachineSession` keeps the watched set
+      equal to its agent list, and `LiveHerdrClient` reopens the subscription
+      when that set changes — silently, since nothing failed.
+    - One unknown `pane_id` fails the whole subscribe with `pane_not_found`.
+      That is treated as a drop: the watches are forgotten, the reconnect
+      resyncs, and the resync supplies a set of panes that exist.
+
+    herdr does not replay what happened while a subscription was being
+    reopened. So while any agent is working, the supervisor tick compares
+    `agent.list`'s stamps with the rows and resyncs on a difference — working
+    is the one state whose missed exit leaves a row lying.
+
 ## Decisions kept on record
 
 **`StateClassifier` does not defer to `agent.explain`.** Measured against

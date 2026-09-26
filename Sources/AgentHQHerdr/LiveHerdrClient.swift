@@ -157,6 +157,14 @@ public actor LiveHerdrClient: HerdrClient {
         _ = try await request(method: "pane.focus", params: ["pane_id": paneId])
     }
 
+    /// Resubscribe with a `pane.agent_status_changed` per pane, when the set
+    /// has changed. herdr has no call to add a subscription to an open one, so
+    /// the connection is dropped and the thread reopens it at once — without
+    /// reporting a disconnect, since nothing went wrong.
+    public func watchAgentStatus(paneIds: Set<String>) async {
+        subscriptionState.watch(paneIds)
+    }
+
     // MARK: - Transport
 
     /// One request, one connection. See ``HerdrConnection``.
@@ -228,23 +236,38 @@ public actor LiveHerdrClient: HerdrClient {
 
         let thread = Thread {
             var backoff: UInt32 = 250
+            var isAnnounced = false
             while !state.isStopped {
+                let watching = state.watched
                 do {
-                    let connection = try Self.openSubscription(path: path, requestId: requestId)
-                    state.adopt(connection)
-                    continuation.yield(.connected)
-                    backoff = 250
+                    let connection = try Self.openSubscription(
+                        path: path, requestId: requestId, watching: watching
+                    )
+                    if state.adopt(connection, watching: watching) {
+                        if !isAnnounced { continuation.yield(.connected) }
+                        isAnnounced = true
+                        backoff = 250
 
-                    while !state.isStopped, let line = try connection.readLine() {
-                        if let event = Self.decodeEvent(line) {
-                            continuation.yield(event)
+                        while !state.isStopped, let line = try connection.readLine() {
+                            if let event = Self.decodeEvent(line) {
+                                continuation.yield(event)
+                            }
                         }
                     }
+                } catch HerdrProtocolError.herdr(let code, _) where code == "pane_not_found" {
+                    // A watched pane closed before the subscription reached
+                    // herdr, which refuses the whole request for it. Its
+                    // `pane_closed` may have gone out in the gap too, so this
+                    // is reported as a drop: the reconnect resyncs, and the
+                    // resync hands back a set of panes that exist.
+                    state.forgetWatches()
                 } catch {
                     // fall through to backoff
                 }
-                state.releaseConnection()
+                let isRestart = state.releaseConnection()
                 guard !state.isStopped else { break }
+                if isRestart { continue }
+                isAnnounced = false
                 continuation.yield(.disconnected)
                 // A subscription that dies once and stays dead leaves the
                 // panel showing whenever the socket hiccuped, which looks
@@ -258,7 +281,11 @@ public actor LiveHerdrClient: HerdrClient {
         thread.start()
     }
 
-    private static func openSubscription(path: String, requestId: String) throws -> HerdrConnection {
+    private static func openSubscription(
+        path: String,
+        requestId: String,
+        watching: Set<String>
+    ) throws -> HerdrConnection {
         // No timeout: the stream is push-based and silence is normal.
         let connection = try HerdrConnection(path: path, timeoutSeconds: 0)
         let body: [String: Any] = [
@@ -267,14 +294,26 @@ public actor LiveHerdrClient: HerdrClient {
             "method": "events.subscribe",
             // Objects, not strings: protocol 22 models a subscription as an
             // internally tagged enum and rejects a bare name.
-            "params": ["subscriptions": globalSubscriptions.map { ["type": $0] }],
+            "params": ["subscriptions": subscriptions(watching: watching)],
         ]
         try connection.write(try JSONSerialization.data(withJSONObject: body))
         guard let ack = try connection.readLine() else {
             throw HerdrProtocolError.closedBeforeReply
         }
-        _ = try unwrap(ack)
+        do {
+            _ = try unwrap(ack)
+        } catch {
+            connection.closeSocket()
+            throw error
+        }
         return connection
+    }
+
+    /// The global subscriptions, plus one status watch per pane. Sorted so the
+    /// request is the same for the same set.
+    static func subscriptions(watching paneIds: Set<String>) -> [[String: String]] {
+        globalSubscriptions.map { ["type": $0] }
+            + paneIds.sorted().map { ["type": "pane.agent_status_changed", "pane_id": $0] }
     }
 }
 
@@ -288,21 +327,57 @@ private final class SubscriptionState: @unchecked Sendable {
     private let lock = NSLock()
     private var connection: HerdrConnection?
     private var stopped = false
+    private var watching: Set<String> = []
+    /// Set when the connection was dropped to change what it watches, so the
+    /// thread reopens at once instead of reporting a disconnect.
+    private var restartRequested = false
 
     var isStopped: Bool {
         lock.lock(); defer { lock.unlock() }
         return stopped
     }
 
-    func adopt(_ connection: HerdrConnection) {
+    var watched: Set<String> {
         lock.lock(); defer { lock.unlock() }
-        self.connection = connection
+        return watching
     }
 
-    func releaseConnection() {
+    func watch(_ paneIds: Set<String>) {
+        lock.lock(); defer { lock.unlock() }
+        guard paneIds != watching else { return }
+        watching = paneIds
+        restartRequested = true
+        connection?.closeSocket()
+        connection = nil
+    }
+
+    func forgetWatches() {
+        lock.lock(); defer { lock.unlock() }
+        watching = []
+    }
+
+    /// Install a freshly opened connection, unless the set changed while it
+    /// was being opened — then it is closed, and the thread goes round again.
+    func adopt(_ connection: HerdrConnection, watching opened: Set<String>) -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        guard !stopped, opened == watching else {
+            connection.closeSocket()
+            restartRequested = !stopped
+            return false
+        }
+        restartRequested = false
+        self.connection = connection
+        return true
+    }
+
+    /// Close the connection. Returns whether that was a deliberate restart.
+    func releaseConnection() -> Bool {
         lock.lock(); defer { lock.unlock() }
         connection?.closeSocket()
         connection = nil
+        let isRestart = restartRequested
+        restartRequested = false
+        return isRestart
     }
 
     func stop() {

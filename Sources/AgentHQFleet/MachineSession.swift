@@ -23,6 +23,10 @@ public actor MachineSession {
     /// workspaceId -> label, from the last snapshot. A `pane_updated` event
     /// carries ids but not labels, so patching one in place needs this.
     private var workspaceNames: [String: String] = [:]
+    /// The last full record for each pane, by id. A `pane.agent_status_changed`
+    /// event carries only the status, so applying one needs the rest of the
+    /// record from here.
+    private var panes: [String: HerdrPane] = [:]
 
     /// Builds the client for a resolved socket path.
     ///
@@ -243,7 +247,11 @@ public actor MachineSession {
         guard machine.isEnabled, !isRebuilding else { return .nothingToDo }
 
         switch reachability {
-        case .disabled, .connecting, .connected:
+        case .connected:
+            await reconcileWorkingAgents()
+            return .nothingToDo
+
+        case .disabled, .connecting:
             // `connecting` included: a rebuild or a first connect is already
             // out on the network, and a second one would race it.
             return .nothingToDo
@@ -270,11 +278,34 @@ public actor MachineSession {
         return reachability.isConnected ? .recovered : .failed
     }
 
+    /// Check a working agent has not stopped without anything saying so.
+    ///
+    /// The status watch is what reports a turn ending, and it has gaps: herdr
+    /// cannot add a subscription to an open one, so every change to the set of
+    /// panes drops and reopens it, and a transition inside that window is not
+    /// replayed. A row left on Working by a missed event stays there — which
+    /// is the bug this exists to close, not a cosmetic lag.
+    ///
+    /// One `agent.list` per tick, and only while something is working: that is
+    /// the one state whose missed exit leaves a row lying. The stamps say
+    /// whether anything moved, so an unchanged herd costs no resync.
+    private func reconcileWorkingAgents() async {
+        guard let client, agents.contains(where: { $0.state == .working }),
+              let infos = try? await client.agents()
+        else { return }
+        let listed = Dictionary(infos.map { ($0.paneId, $0.stateChangeSeq) }, uniquingKeysWith: { a, _ in a })
+        let shown = Dictionary(agents.map { ($0.ref.agent.raw, $0.stateSeq) }, uniquingKeysWith: { a, _ in a })
+        let moved = listed.contains { paneId, seq in shown[paneId] != .some(seq) }
+        let vanished = shown.keys.contains { listed[$0] == nil }
+        if moved || vanished { try? await resync() }
+    }
+
     /// Pull a full snapshot and replace the agent list.
     public func resync() async throws {
         guard let client else { return }
         let snapshot = try await client.snapshot()
         workspaceNames = snapshot.workspaceNames
+        panes = Dictionary(snapshot.panes.map { ($0.paneId, $0) }, uniquingKeysWith: { a, _ in a })
         let output = await readOutput(for: snapshot.panes, using: client)
         // One extra round trip for the whole machine, because herdr's agent
         // view carries two things the snapshot's pane records do not: the
@@ -289,6 +320,13 @@ public actor MachineSession {
         }
         let previous = Dictionary(agents.map { ($0.ref, $0) }, uniquingKeysWith: { a, _ in a })
         agents = reconcile(applyCompletions(incoming, previous: previous))
+        await watchAgents()
+    }
+
+    /// Keep the status watch on exactly the panes in the list. The client
+    /// does nothing when the set is unchanged, so this is called freely.
+    private func watchAgents() async {
+        await client?.watchAgentStatus(paneIds: Set(agents.map(\.ref.agent.raw)))
     }
 
     private func readAgentViews(using client: any HerdrClient) async -> [String: HerdrAgentInfo] {
@@ -697,50 +735,23 @@ public actor MachineSession {
     private func apply(_ event: HerdrEvent) async {
         switch event {
         case .paneUpdated(let pane):
-            // `data.pane` is the full pane record, so this patches in place.
-            // Resnapshotting per event would cost a round trip each time —
-            // ~115ms to a machine across an ssh tunnel — and a chatty agent
-            // emits these continuously.
-            //
-            // The output read is the one round trip that remains, and it only
-            // happens for a pane that has actually stopped: a working agent's
-            // output changes constantly and nothing is waiting on it.
-            var output: String?
-            var view: HerdrAgentInfo?
-            if pane.agent?.isEmpty == false {
-                let hasStopped = Self.warrantsOutputRead(pane.agentStatus)
-                let moved = hasMoved(pane)
-                if hasStopped {
-                    output = try? await client?.readPane(paneId: pane.paneId, lines: 60)
-                }
-                // The agent view is fetched for a stopped pane, and for any
-                // pane whose state has just changed.
-                //
-                // Stopped, because the pane record cannot say `done` — it
-                // spells a finished run `idle`, and this call is the only
-                // thing on this path that tells the two apart.
-                //
-                // Changed, because the stamp lives only on the agent view, and
-                // a row rebuilt without one cannot be acted on at all: the
-                // guard in `perform` fails closed on a nil stamp, by design.
-                // Fetching only for stopped panes meant an agent that had just
-                // *started* working had no stamp until the next full resync —
-                // so Stop refused, and said "it moved from working to working
-                // first", for the entire window in which anyone wants to press
-                // Stop.
-                //
-                // This is O(state changes), not O(events), which is what makes
-                // it affordable. A working agent emits `pane_updated`
-                // continuously as it writes output, and those carry the status
-                // it already has: they compare equal here and cost nothing.
-                if hasStopped || moved {
-                    view = try? await client?.agent(paneId: pane.paneId)
-                }
+            await update(pane)
+
+        case .agentStatusChanged(let paneId, let status):
+            // The one event that reliably reports a turn ending: see
+            // `HerdrClient.watchAgentStatus`. It goes through the same path as
+            // a pane record, so the stamp and a finished `done` are fetched
+            // exactly as they would be for one.
+            if let pane = panes[paneId] {
+                await update(pane.with(agentStatus: status))
+            } else {
+                try? await resync()
             }
-            patch(pane, output: output, view: view)
 
         case .paneClosed(let paneId):
+            panes[paneId] = nil
             agents.removeAll { $0.ref.agent.raw == paneId }
+            await watchAgents()
 
         case .topologyChanged:
             // Labels moved. These events carry no pane, and rebuilding a
@@ -770,6 +781,53 @@ public actor MachineSession {
             hasSyncedSinceConnect = false
             reachability = .reconnecting(attempt: nextReconnectAttempt())
         }
+    }
+
+    /// Apply one full pane record, fetching what it cannot carry.
+    private func update(_ pane: HerdrPane) async {
+        panes[pane.paneId] = pane
+        // `data.pane` is the full pane record, so this patches in place.
+        // Resnapshotting per event would cost a round trip each time —
+        // ~115ms to a machine across an ssh tunnel — and a chatty agent
+        // emits these continuously.
+        //
+        // The output read is the one round trip that remains, and it only
+        // happens for a pane that has actually stopped: a working agent's
+        // output changes constantly and nothing is waiting on it.
+        var output: String?
+        var view: HerdrAgentInfo?
+        if pane.agent?.isEmpty == false {
+            let hasStopped = Self.warrantsOutputRead(pane.agentStatus)
+            let moved = hasMoved(pane)
+            if hasStopped {
+                output = try? await client?.readPane(paneId: pane.paneId, lines: 60)
+            }
+            // The agent view is fetched for a stopped pane, and for any
+            // pane whose state has just changed.
+            //
+            // Stopped, because the pane record cannot say `done` — it
+            // spells a finished run `idle`, and this call is the only
+            // thing on this path that tells the two apart.
+            //
+            // Changed, because the stamp lives only on the agent view, and
+            // a row rebuilt without one cannot be acted on at all: the
+            // guard in `perform` fails closed on a nil stamp, by design.
+            // Fetching only for stopped panes meant an agent that had just
+            // *started* working had no stamp until the next full resync —
+            // so Stop refused, and said "it moved from working to working
+            // first", for the entire window in which anyone wants to press
+            // Stop.
+            //
+            // This is O(state changes), not O(events), which is what makes
+            // it affordable. A working agent emits `pane_updated`
+            // continuously as it writes output, and those carry the status
+            // it already has: they compare equal here and cost nothing.
+            if hasStopped || moved {
+                view = try? await client?.agent(paneId: pane.paneId)
+            }
+        }
+        patch(pane, output: output, view: view)
+        await watchAgents()
     }
 
     /// The attempt number to report while the subscription is down.

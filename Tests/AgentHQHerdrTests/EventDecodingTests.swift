@@ -62,6 +62,27 @@ struct EventDecodingTests {
         #expect(decode(#"{"data": {"pane_id": "x", "type": "pane.closed"}, "event": "pane.closed"}"#) == nil)
     }
 
+    /// Captured off herdr 0.9.1, with no client attached. This is the event
+    /// that reports a turn ending when `pane_updated` does not.
+    @Test("agent_status_changed is dotted on the wire and carries the status alone")
+    func agentStatusChanged() {
+        #expect(decode(#"{"data": {"agent": "claude", "agent_status": "idle", "pane_id": "w1:p1", "workspace_id": "w1"}, "event": "pane.agent_status_changed"}"#)
+                == .agentStatusChanged(paneId: "w1:p1", status: "idle"))
+    }
+
+    /// herdr rejects `pane.agent_status_changed` without a `pane_id` —
+    /// `missing field pane_id` — so each watched pane is its own entry.
+    @Test("each watched pane gets its own status subscription, with its pane id")
+    func statusWatchesNamePanes() {
+        let subs = LiveHerdrClient.subscriptions(watching: ["w1:p2", "w1:p1"])
+        let watches = subs.filter { $0["type"] == "pane.agent_status_changed" }
+        #expect(watches == [
+            ["type": "pane.agent_status_changed", "pane_id": "w1:p1"],
+            ["type": "pane.agent_status_changed", "pane_id": "w1:p2"],
+        ])
+        #expect(subs.count == LiveHerdrClient.globalSubscriptions.count + 2)
+    }
+
     @Test("an unknown event is dropped, not guessed at")
     func unknownEvent() {
         #expect(decode(#"{"data": {"type": "plugin_did_something"}, "event": "plugin_did_something"}"#) == nil)

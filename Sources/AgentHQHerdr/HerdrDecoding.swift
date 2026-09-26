@@ -114,6 +114,15 @@ extension LiveHerdrClient {
                   let decoded = decodePane(pane) else { return nil }
             return .paneUpdated(decoded)
 
+        // Dotted on the wire, unlike every other event name here: measured
+        // against herdr 0.9.1. The snake_case spelling is accepted too, so a
+        // herdr that makes the names consistent does not silently drop it.
+        case "pane.agent_status_changed", "pane_agent_status_changed":
+            guard let paneId = data["pane_id"] as? String,
+                  let status = data["agent_status"] as? String
+            else { return nil }
+            return .agentStatusChanged(paneId: paneId, status: status)
+
         case "pane_closed", "pane_exited":
             guard let paneId = data["pane_id"] as? String
                 ?? (data["pane"] as? [String: Any])?["pane_id"] as? String
