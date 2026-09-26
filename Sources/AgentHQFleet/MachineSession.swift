@@ -633,32 +633,62 @@ public actor MachineSession {
     /// 3. **Where nothing was offered, stop and say so.** One `C-c` has
     ///    landed by then and cannot be taken back, so the refusal names what
     ///    was sent instead of claiming nothing happened.
+    ///
+    /// Step 2 has one exception, and it is why the gesture may run twice. On
+    /// an agent that is mid-turn, `C-c` is spent interrupting the turn:
+    /// Claude Code answers it with "Interrupted · What should Claude do
+    /// instead?" and an empty input, not with an offer to exit. herdr's own
+    /// status is the witness — it moved (`working` → `idle`, measured at
+    /// ~150ms) — so the press did something other than begin an exit, and
+    /// the gesture starts over from step 1 against the agent as it now is.
+    /// Once only: a second press that moves the status and still offers
+    /// nothing is not a pattern to keep feeding keys into.
     private func endConversation(_ agent: Agent, using client: any HerdrClient) async throws {
         let paneId = agent.ref.agent.raw
         let affordances = PromptAffordances()
+        let interrupt = PromptAffordances.defaultInterruptKey
+        var sent: [String] = []
 
-        let before = try? await client.readPane(paneId: paneId, lines: 60)
-        if let named = affordances.exitKey(inRecentOutput: before),
-           named != PromptAffordances.defaultInterruptKey {
-            try await send { try await client.sendKeys(paneId: paneId, keys: [named]) }
-            return
+        for attempt in 1...2 {
+            let before = try? await client.readPane(paneId: paneId, lines: 60)
+            if let named = affordances.exitKey(inRecentOutput: before), named != interrupt {
+                try await send { try await client.sendKeys(paneId: paneId, keys: [named]) }
+                return
+            }
+
+            let statusBefore = try? await client.agent(paneId: paneId)?.agentStatus
+            try await send { try await client.sendKeys(paneId: paneId, keys: [interrupt]) }
+            sent.append(interrupt)
+
+            // The agent needs a moment to redraw before it can be asked whether
+            // it is offering to exit. Reading instantly would read the pane as
+            // it was before the key landed and conclude, wrongly, that nothing
+            // was offered — then say so, having half-quit the agent.
+            try? await Task.sleep(for: .milliseconds(400))
+            let after = try? await client.readPane(paneId: paneId, lines: 60)
+            if let again = affordances.exitConfirmationKey(inRecentOutput: after)
+                ?? affordances.exitKey(inRecentOutput: after) {
+                try await send { try await client.sendKeys(paneId: paneId, keys: [again]) }
+                return
+            }
+
+            // herdr answering that the pane has no agent any more means it quit
+            // on the one press, which is what End asked for. A failed read says
+            // nothing either way, and is not taken as success.
+            let statusAfter: String?
+            do {
+                guard let found = try await client.agent(paneId: paneId) else { return }
+                statusAfter = found.agentStatus
+            } catch {
+                statusAfter = nil
+            }
+
+            guard attempt == 1,
+                  let statusBefore, let statusAfter,
+                  statusAfter != statusBefore
+            else { break }
         }
-
-        let first = PromptAffordances.defaultInterruptKey
-        try await send { try await client.sendKeys(paneId: paneId, keys: [first]) }
-
-        // The agent needs a moment to redraw before it can be asked whether it
-        // is offering to exit. Reading instantly would read the pane as it was
-        // before the key landed and conclude, wrongly, that nothing was
-        // offered — then say so, having half-quit the agent.
-        try? await Task.sleep(for: .milliseconds(400))
-        let after = try? await client.readPane(paneId: paneId, lines: 60)
-        guard let again = affordances.exitConfirmationKey(inRecentOutput: after)
-                ?? affordances.exitKey(inRecentOutput: after)
-        else {
-            throw InterventionError.exitNotConfirmed(sent: first)
-        }
-        try await send { try await client.sendKeys(paneId: paneId, keys: [again]) }
+        throw InterventionError.exitNotConfirmed(sent: sent.joined(separator: " "))
     }
 
     /// Re-read the agent and require that it has not moved since the panel drew

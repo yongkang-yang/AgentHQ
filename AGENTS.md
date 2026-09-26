@@ -88,7 +88,9 @@ herdr before trusting any of them.
     `pane.close`). It reads its keys the same way: a footer-named exit key
     once; otherwise `C-c`, and a second press only if the pane asks for it;
     otherwise stop with `exitNotConfirmed`, the only `InterventionError` that
-    reports a keystroke having gone out. End takes no staleness stamp; the
+    reports a keystroke having gone out. A `C-c` that moves herdr's
+    `agent_status` without offering an exit was spent interrupting a turn,
+    not exiting; the gesture starts over once, under the same rules. End takes no staleness stamp; the
     panel's confirmation is its guard.
 12. **No continuous animation inside `MenuBarExtra`.** It makes the panel
     flicker open and closed. Emphasis is static.
