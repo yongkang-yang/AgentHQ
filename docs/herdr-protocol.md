@@ -175,6 +175,82 @@ The pinned prompt was once the row's six-line `message`, which cut a
 four-option menu to its last options and lost the `❯` saying which one enter
 takes. It is now the whole prompt block, `Agent.prompt`.
 
+## Codex: `unknown` status and the shared daemon (invariants 3, 14)
+
+Measured 2026-09-30 against herdr 0.9.3 and Codex CLI 0.159.2 on the WSL
+machine. Two separate faults, one root: herdr cannot tell which pane a Codex
+turn belongs to.
+
+**A Codex row shows `unknown`, and a finished turn is never reported.** herdr
+itself sends `"agent_status": "unknown"` — `agent.explain` gives
+`fallback_reason: codex_state_ambiguous`, `matched_rule: None`, for a pane
+sitting at `› Ask Codex to do anything`. This is documented herdr behavior, not
+a decode error: other agents fall back to `idle` when no rule matches, Codex
+falls back to `unknown`, because its composer looks the same during a turn and
+after one (herdr's `agents.mdx`). The remote `codex.toml` manifest
+(2026.09.23.1) has no `idle` rule at all. Because a completion is a
+`working` → `idle`/`finished` transition (invariant 9), `working` → `unknown`
+never becomes `completedUnseen`. AgentHQ shows `unknown` as it arrives; that
+is invariant 3 working, not a bug to paper over.
+
+**A Codex row has no `agent_session`, so no transcript.** Codex 0.157+
+auto-starts a shared `codex app-server --managed-daemon`; every Codex TUI
+attaches to it, and sessions, turns and **hooks run inside the daemon**, with
+the environment of whichever terminal started it. Measured: the TUI's log
+lines were all `codex_tui::*`, every `codex_core::session::*` came from the
+daemon, and the daemon's `HERDR_PANE_ID` was `wZ:pF` — a pane that no longer
+existed. The integration's SessionStart hook reported every session there,
+herdr answered `pane_not_found`, and the hook swallows errors. Worse when the
+starting pane is still alive: every Codex session binds to *that* pane, which
+is wrong data rather than missing data.
+
+A Codex session also does not exist until its first prompt: a freshly opened
+Codex has no rollout file and no `agent_session` yet, correctly.
+
+**Workaround in place on WSL** (`~/.codex/config.toml`, backup at
+`config.toml.bak-20260930-daemon`):
+
+```toml
+[features]
+daemon_auto_start = false
+```
+
+The setting does not stop a running daemon: it was stopped with
+`codex app-server daemon stop` once no Codex was attached, plus its
+`pid-update-loop`, which `stop` leaves running. After that a new Codex ran in
+its own pane's process, `agent_session` arrived after the first prompt, and
+the console read its rollout. Status stays `unknown`. Any other machine running
+Codex 0.157+ needs the same setting.
+
+**Upstream:**
+
+- [herdr#4649](https://github.com/herdrdev/herdr/issues/4649) — shared daemon
+  breaks per-pane sessions and `HERDR_*`; open, herdr waiting on upstream.
+  Duplicates: #4658, #4606.
+- [openai/codex#24638](https://github.com/openai/codex/issues/24638) — the
+  app-server has no per-client environment; open.
+- [herdr#4778](https://github.com/herdrdev/herdr/issues/4778) — idle Codex
+  reported `unknown`; closed as the documented limitation. Duplicates: #4793,
+  #4786.
+- [herdr#4756](https://github.com/herdrdev/herdr/pull/4756) — Codex
+  `UserPromptSubmit`/`Stop`/`Interrupt` hooks report working/idle, for
+  pane-local sessions only (no daemon). Merged 2026-09-29, **not in 0.9.3**.
+
+**On a herdr or Codex update, check:**
+
+1. Does the herdr release include #4756? Then run
+   `herdr integration install codex` on each machine and confirm
+   `herdr integration status` shows a version above v8, and that `hooks.json`
+   gains `Stop` beside `SessionStart`. A finished Codex turn should then show
+   `idle` in `agent.list` and raise a completion in AgentHQ with no code
+   change here.
+2. Has openai/codex#24638 or herdr#4649 closed? Only then drop
+   `daemon_auto_start = false`, and re-measure that a daemon-attached Codex
+   reports `agent_session` to its own pane.
+3. Until both, AgentHQ should not infer Codex idle from the screen — herdr
+   declined to for a reason — and should not trust a Codex `agent_session`
+   on a machine where the daemon is running.
+
 ## `pane_updated` vs `pane.agent_status_changed` (invariant 15)
 
 In a headless session (`herdr --session <name> server`, no client attached —
