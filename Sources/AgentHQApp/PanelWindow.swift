@@ -50,7 +50,7 @@ final class PanelWindowController: NSObject {
         hosting.sizingOptions = [.preferredContentSize]
 
         panel = GlassPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 460, height: 200),
+            contentRect: NSRect(x: 0, y: 0, width: 400, height: 200),
             styleMask: [.borderless],
             backing: .buffered,
             defer: true

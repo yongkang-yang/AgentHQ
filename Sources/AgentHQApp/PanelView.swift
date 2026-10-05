@@ -20,7 +20,7 @@ struct PanelView: View {
     @State private var headerNote: HeaderNote?
 
     static let minimumListHeight: CGFloat = 96
-    static let maximumListHeight: CGFloat = 460
+    static let maximumListHeight: CGFloat = 400
 
     private let tick = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
 
@@ -104,7 +104,7 @@ struct PanelView: View {
                     .padding(.vertical, 8)
             }
         }
-        .frame(width: 460)
+        .frame(width: 400)
         .onReceive(tick) { now = $0 }
     }
 

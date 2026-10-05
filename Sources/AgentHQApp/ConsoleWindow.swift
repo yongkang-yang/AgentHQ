@@ -24,7 +24,7 @@ final class ConsoleWindows {
         }
 
         let panel = NSPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 720, height: 480),
+            contentRect: NSRect(x: 0, y: 0, width: 620, height: 420),
             // Not `.utilityWindow`: its shrunken title bar made the window
             // controls too small to hit comfortably.
             styleMask: [.titled, .closable, .resizable, .miniaturizable],
@@ -43,7 +43,7 @@ final class ConsoleWindows {
                 panel?.occlusionState.contains(.visible) ?? false
             }
         )
-        panel.setContentSize(NSSize(width: 720, height: 480))
+        panel.setContentSize(NSSize(width: 620, height: 420))
         panel.center()
 
         windows[ref] = panel
