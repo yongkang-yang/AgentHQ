@@ -135,6 +135,17 @@ pi's footer is `ctrl+c/ctrl+d clear/exit` — two **parallel lists**, where
 `C-c` with "Press Ctrl-C again to exit"; that sentence is the authority for a
 second press. The algorithm is in `MachineSession.endConversation`.
 
+The offer to exit does not wait. Measured against herdr 0.9.3 on WSL through
+the tunnel: Claude Code showed "Press Ctrl-C again to exit" in reads starting
+0.13s and 0.63s after the first press and not in one starting 1.13s. End used
+to wait 400ms and then read `recent` for 60 rows, which on an idle agent's
+pane takes ~500ms (40 rows on screen; `recent` for 12 rows, `visible` and
+`detection` all take ~120ms, as does `recent` on a plain shell pane). The
+second press landed after the window, counted as a first press, and the agent
+stayed up while End reported it had asked. End now reads `visible` every 150ms,
+up to four times, and presses as soon as the offer is there: seen at 0.40s,
+second press in by 0.52s, agent gone.
+
 A Stop button that interrupted the current turn existed briefly and was removed
 at the user's request: stopping a turn is done while watching the agent, in the
 agent, and a second terminating button whose difference from End needs

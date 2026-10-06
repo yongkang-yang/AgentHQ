@@ -696,7 +696,7 @@ public actor MachineSession {
         var sent: [String] = []
 
         for attempt in 1...2 {
-            let before = try? await client.readPane(paneId: paneId, lines: 60)
+            let before = try? await client.readPane(paneId: paneId, lines: 60, source: .visible)
             if let named = affordances.exitKey(inRecentOutput: before), named != interrupt {
                 try await send { try await client.sendKeys(paneId: paneId, keys: [named]) }
                 return
@@ -707,13 +707,23 @@ public actor MachineSession {
             sent.append(interrupt)
 
             // The agent needs a moment to redraw before it can be asked whether
-            // it is offering to exit. Reading instantly would read the pane as
-            // it was before the key landed and conclude, wrongly, that nothing
-            // was offered — then say so, having half-quit the agent.
-            try? await Task.sleep(for: .milliseconds(400))
-            let after = try? await client.readPane(paneId: paneId, lines: 60)
-            if let again = affordances.exitConfirmationKey(inRecentOutput: after)
-                ?? affordances.exitKey(inRecentOutput: after) {
+            // it is offering to exit, and the offer does not wait: Claude Code
+            // shows "Press Ctrl-C again to exit" for about a second (measured,
+            // herdr 0.9.3 over the tunnel), and a press after that is a first
+            // press again. So this looks early and often, and reads the
+            // visible screen: the footer is on it, and `recent` asked for
+            // more rows than the screen holds took ~500ms on an idle agent's
+            // pane against ~120ms. A fixed 400ms wait and that read put the
+            // second press past the window, and End quit nothing.
+            var again: String?
+            for _ in 0..<4 {
+                try? await Task.sleep(for: .milliseconds(150))
+                let after = try? await client.readPane(paneId: paneId, lines: 60, source: .visible)
+                again = affordances.exitConfirmationKey(inRecentOutput: after)
+                    ?? affordances.exitKey(inRecentOutput: after)
+                if again != nil { break }
+            }
+            if let again {
                 try await send { try await client.sendKeys(paneId: paneId, keys: [again]) }
                 return
             }
