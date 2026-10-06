@@ -30,6 +30,11 @@ jobs:
           xcodebuild -version
           swift --version
 
+      - name: Install Ghostty
+        # The reveal test compiles its AppleScript against Ghostty's own
+        # scripting dictionary, so the app has to be installed.
+        run: brew install --cask ghostty
+
       - name: Test
         run: swift test
 
