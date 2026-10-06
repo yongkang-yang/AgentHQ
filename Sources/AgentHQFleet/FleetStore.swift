@@ -172,21 +172,12 @@ public final class FleetStore {
         await refresh()
     }
 
-    /// Start an agent in a new herdr workspace on one machine. See
-    /// `MachineSession.launch(_:in:)`.
-    public func launch(_ launcher: AgentLauncher, in directory: String, on machine: MachineID) async throws -> AgentRef {
+    /// Open a shell in a new herdr workspace on one machine. See
+    /// `MachineSession.openShell(in:)`.
+    public func openShell(on machine: MachineID, in directory: String = "~") async throws -> AgentRef {
         guard let session = sessions[machine] else { throw LaunchError.machineUnreachable }
-        let agent = try await session.launch(launcher, in: directory)
-        return AgentRef(machine: machine, agent: agent)
-    }
-
-    /// Wait for a just-launched agent to be listed, so its console has a row
-    /// to read. False when it never appeared.
-    public func awaitAgent(_ ref: AgentRef) async -> Bool {
-        guard let session = sessions[ref.machine] else { return false }
-        let appeared = await session.awaitAgent(ref.agent)
-        await refresh()
-        return appeared
+        let pane = try await session.openShell(in: directory)
+        return AgentRef(machine: machine, agent: pane)
     }
 
     /// One pane's screen as it stands, for the console window.

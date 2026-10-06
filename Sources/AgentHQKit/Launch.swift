@@ -1,34 +1,7 @@
 import Foundation
 
-/// An agent AgentHQ can start in a new herdr workspace.
-///
-/// The ones with a transcript reader, so a console opened on what was just
-/// started shows the conversation rather than only the mirrored screen.
-public enum AgentLauncher: String, CaseIterable, Sendable, Identifiable {
-    case claude
-    case codex
-    case pi
-    case opencode
-
-    public var id: String { rawValue }
-
-    public var title: String {
-        switch self {
-        case .claude: "Claude Code"
-        case .codex: "Codex"
-        case .pi: "pi"
-        case .opencode: "opencode"
-        }
-    }
-
-    /// What gets typed into the new pane's shell. The bare executable name:
-    /// the pane's own login shell finds it on its own `PATH`, which on a
-    /// remote machine is the only `PATH` that knows where it was installed.
-    public var command: String { rawValue }
-}
-
-/// A directory typed into the New agent window, made into a script that runs
-/// on the target machine and prints where it really is.
+/// The directory a new shell starts in, made into a script that runs on the
+/// target machine and prints where it really is.
 ///
 /// Resolved on the machine itself, not here: a WSL path means nothing to this
 /// Mac, `~` is the remote user's home, and a directory that does not exist
@@ -79,7 +52,7 @@ public enum LaunchDirectory {
     }
 }
 
-/// Why a New agent request did not start anything.
+/// Why New shell did not open anything.
 public enum LaunchError: Error, Sendable, Equatable {
     /// Not an absolute path, `~` or `~/…`.
     case unsupportedPath

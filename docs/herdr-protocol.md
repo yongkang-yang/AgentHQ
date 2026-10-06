@@ -277,7 +277,7 @@ Dotted, unlike every other event name. Subscribing without a `pane_id` fails
 with ``missing field `pane_id` ``; subscribing with an unknown one fails the
 whole request with `pane_not_found`.
 
-## `workspace.create` (New agent)
+## `workspace.create` (Shell)
 
 Measured against herdr 0.9.2 on this Mac and 0.9.3 on WSL, through the tunnel.
 
@@ -295,9 +295,14 @@ Measured against herdr 0.9.2 on this Mac and 0.9.3 on WSL, through the tunnel.
   the resolved path (`/tmp` comes back `/private/tmp`), which is why the
   check compares against `pwd -P`.
 - Text sent to the root pane immediately after the reply is run: the tty
-  buffers it until the shell reads. `pane.send_input` (`text` plus `keys`)
-  is what `herdr pane run` sends; `agent.start` also exists but was only
-  measured locally, so New agent types the command with `pane.send_text`.
+  buffers it until the shell reads, and a trailing `\n` in `pane.send_text`
+  submits in zsh. `pane.send_input` (`text` plus `keys`) is what
+  `herdr pane run` sends.
+- The pane's shell is interactive, so it has the user's `PATH`, aliases and
+  zoxide's `z`; a non-interactive `ssh host cmd` on the same WSL host found
+  none of `claude`, `opencode`, `codex` or `pi`. So AgentHQ opens the shell
+  and leaves the typing to the user rather than checking or launching an
+  agent itself.
 
 ## `agent.explain` (decision)
 

@@ -16,7 +16,9 @@ final class ConsoleWindows {
     private var windows: [AgentRef: NSPanel] = [:]
     private var closeObservers: [AgentRef: NSObjectProtocol] = [:]
 
-    func open(_ ref: AgentRef, title: String, fleet: FleetStore) {
+    /// `isShell` for a pane opened as a plain shell: until an agent is
+    /// started in it there is no row, and that is not the agent having gone.
+    func open(_ ref: AgentRef, title: String, fleet: FleetStore, isShell: Bool = false) {
         if let existing = windows[ref] {
             NSApp.activate(ignoringOtherApps: true)
             existing.makeKeyAndOrderFront(nil)
@@ -37,7 +39,7 @@ final class ConsoleWindows {
         panel.isReleasedWhenClosed = false
         panel.collectionBehavior = [.fullScreenAuxiliary, .moveToActiveSpace]
         panel.contentViewController = NSHostingController(
-            rootView: ConsoleView(ref: ref, fleet: fleet) { [weak panel] in
+            rootView: ConsoleView(ref: ref, fleet: fleet, isShell: isShell) { [weak panel] in
                 // Hidden behind another window, on another Space, or in the
                 // Dock: nobody is reading, so nothing is read.
                 panel?.occlusionState.contains(.visible) ?? false
@@ -71,6 +73,7 @@ final class ConsoleWindows {
 private struct ConsoleView: View {
     let ref: AgentRef
     let fleet: FleetStore
+    let isShell: Bool
     let isVisible: @MainActor () -> Bool
 
     @State private var screen = ""
@@ -276,7 +279,10 @@ private struct ConsoleView: View {
 
     private var inputRow: some View {
         HStack(spacing: 6) {
-            TextField("Message — Return sends", text: $input)
+            TextField(
+                isShell && agent == nil ? "Command — Return runs" : "Message — Return sends",
+                text: $input
+            )
                 .textFieldStyle(.roundedBorder)
                 .font(.system(size: 12, design: .monospaced))
                 .focused($inputFocused)
@@ -320,7 +326,7 @@ private struct ConsoleView: View {
                     .foregroundStyle(Brand.secondaryText)
                     .lineLimit(1)
             } else {
-                Text("Agent no longer listed")
+                Text(isShell ? "Shell" : "Agent no longer listed")
                     .font(Brand.body)
                     .foregroundStyle(Brand.secondaryText)
             }

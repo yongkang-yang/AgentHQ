@@ -134,14 +134,13 @@ struct PanelView: View {
             if let local = fleet.snapshot.machines.first(where: { $0.machine.transport.isLocal }) {
                 OpenHerdrButton(view: local, fleet: fleet, note: $headerNote)
             }
-            if fleet.snapshot.machines.contains(where: { $0.reachability.isConnected }) {
-                // No Ghostty involved: herdr opens the workspace on its own
-                // machine and the console is the window onto it.
-                ActionButton(title: "New agent", tint: .primary) {
-                    NewAgentWindow.shared.open(fleet: fleet)
-                }
-                .help("Start an agent in a directory on any connected machine")
-            }
+            NewShellMenu(
+                machines: fleet.snapshot.machines.filter { $0.machine.isEnabled && $0.reachability.isConnected }
+                    .map(MachineMenuEntry.init),
+                fleet: fleet,
+                note: $headerNote
+            )
+            .equatable()
             SettingsMenu(
                 machines: fleet.snapshot.machines.map(MachineMenuEntry.init),
                 notifier: notifier,
@@ -726,6 +725,61 @@ private struct SettingsMenu: View, Equatable {
                     text: "Could not \(isEnabled ? "enable" : "disable") \(entry.name): \(error.localizedDescription)",
                     isFailure: true
                 )
+            }
+        }
+    }
+}
+
+/// A shell on any connected machine, in its own herdr workspace, typed into
+/// from a console window. No terminal is involved: herdr runs the shell on
+/// its own machine, and an agent started there with the user's own `z`,
+/// aliases and `PATH` is detected and listed like any other.
+///
+/// Equatable for the reason ``SettingsMenu`` is: a menu rebuilt while open
+/// closes under the pointer.
+private struct NewShellMenu: View, Equatable {
+    let machines: [MachineMenuEntry]
+    let fleet: FleetStore
+    @Binding var note: HeaderNote?
+
+    nonisolated static func == (lhs: NewShellMenu, rhs: NewShellMenu) -> Bool {
+        lhs.machines == rhs.machines && lhs.fleet === rhs.fleet
+    }
+
+    var body: some View {
+        if machines.count == 1, let only = machines.first {
+            ActionButton(title: "Shell", tint: .primary) { open(only) }
+                .help("Open a shell on \(only.name) in a console window")
+        } else if !machines.isEmpty {
+            Menu {
+                Section("Open a shell on") {
+                    ForEach(machines) { entry in
+                        Button(entry.name) { open(entry) }
+                    }
+                }
+            } label: {
+                Text("Shell").font(Brand.sectionLabel)
+            }
+            .menuStyle(.borderlessButton)
+            .fixedSize()
+            .help("Open a shell in a console window")
+        }
+    }
+
+    private func open(_ entry: MachineMenuEntry) {
+        note = nil
+        Task {
+            do {
+                let ref = try await fleet.openShell(on: entry.id)
+                ConsoleWindows.shared.open(
+                    ref, title: "Shell · \(entry.name)", fleet: fleet, isShell: true
+                )
+            } catch let error as LaunchError {
+                note = HeaderNote(text: "No shell on \(entry.name): \(error.summary)", isFailure: true)
+            } catch let error as InterventionError {
+                note = HeaderNote(text: "No shell on \(entry.name): \(error.summary)", isFailure: true)
+            } catch {
+                note = HeaderNote(text: "No shell on \(entry.name): \(error)", isFailure: true)
             }
         }
     }

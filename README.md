@@ -112,11 +112,11 @@ is an ordinary entry here.
 Any terminal. Watching agents, notifications, and every action except Reveal
 go through herdr's socket and never touch the terminal herdr is running in.
 
-**No terminal at all** works too. **New agent** in the panel header opens a
-herdr workspace in a directory on any connected machine (a WSL path, `~/…`,
-or a path on this Mac), starts Claude Code, Codex, pi or opencode in it, and
-opens its console. The directory is checked on that machine first; herdr
-itself would silently open a missing one in `$HOME`.
+**No terminal at all** works too. **Shell** in the panel header opens a shell
+on any connected machine (WSL included) in a new herdr workspace, starting in
+that machine's home, and a console window onto it. Type there as in any shell
+(`z project`, then `claude` or `opencode`); herdr detects the agent, it joins
+the panel, and the same console switches to its conversation.
 
 **Reveal is the exception: Ghostty 1.3+ only.** The AppleScript addresses
 `com.mitchellh.ghostty` by bundle id, so no other terminal is supported

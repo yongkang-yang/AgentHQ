@@ -4,7 +4,7 @@ import Foundation
 import Testing
 @testable import AgentHQFleet
 
-/// Records the workspace New agent opened and what it typed there.
+/// Records the workspace New shell opened, and anything typed into it.
 private actor LaunchClient: HerdrClient {
     private(set) var workspaces: [(cwd: String, label: String)] = []
     private(set) var typed: [(pane: String, text: String)] = []
@@ -36,7 +36,7 @@ private actor LaunchClient: HerdrClient {
     func closeWorkspace(workspaceId: String) async throws { closed.append(workspaceId) }
 }
 
-@Suite("New agent")
+@Suite("New shell")
 struct LaunchTests {
     private let machine = Machine(
         id: MachineID("m"), displayName: "m",
@@ -50,19 +50,27 @@ struct LaunchTests {
         return (session, client)
     }
 
-    @Test("it opens a workspace in the directory the machine resolved, and types the agent there")
-    func launches() async throws {
+    @Test("it opens a workspace in the directory the machine resolved, and types nothing")
+    func opensShell() async throws {
         let (session, client) = await session()
         let directory = FileManager.default.temporaryDirectory.resolvingSymlinksInPath().path
-        let pane = try await session.launch(.codex, in: directory)
+        let pane = try await session.openShell(in: directory)
         #expect(pane == AgentID("w9:p1"))
         let workspace = try #require(await client.workspaces.first)
         #expect(workspace.cwd.hasPrefix("/"))
         #expect(workspace.label == (workspace.cwd as NSString).lastPathComponent)
-        let typed = await client.typed
-        #expect(typed.count == 1)
-        #expect(typed.first?.pane == "w9:p1")
-        #expect(typed.first?.text == "codex\n")
+        // What runs there is the user's to type, with their own z and PATH.
+        #expect(await client.typed.isEmpty)
+        await session.stop()
+    }
+
+    @Test("by default the shell starts in the machine's own home")
+    func opensInHome() async throws {
+        let (session, client) = await session()
+        _ = try await session.openShell()
+        let home = URL(fileURLWithPath: NSHomeDirectory()).resolvingSymlinksInPath().path
+        let workspace = try #require(await client.workspaces.first)
+        #expect(URL(fileURLWithPath: workspace.cwd).resolvingSymlinksInPath().path == home)
         await session.stop()
     }
 
@@ -70,7 +78,7 @@ struct LaunchTests {
     func missingDirectory() async throws {
         let (session, client) = await session()
         await #expect {
-            try await session.launch(.claude, in: "/nonexistent-agenthq-\(UUID().uuidString)")
+            try await session.openShell(in: "/nonexistent-agenthq-\(UUID().uuidString)")
         } throws: { error in
             if case LaunchError.directoryUnavailable = error { return true }
             return false
@@ -84,7 +92,7 @@ struct LaunchTests {
     func relativePath() async throws {
         let (session, client) = await session()
         await #expect(throws: LaunchError.unsupportedPath) {
-            try await session.launch(.claude, in: "dev/app")
+            try await session.openShell(in: "dev/app")
         }
         #expect(await client.workspaces.isEmpty)
         await session.stop()
@@ -97,7 +105,7 @@ struct LaunchTests {
         let (session, client) = await session(landsIn: "/home/someone")
         let directory = FileManager.default.temporaryDirectory.resolvingSymlinksInPath().path
         await #expect {
-            try await session.launch(.claude, in: directory)
+            try await session.openShell(in: directory)
         } throws: { error in
             if case LaunchError.directoryUnavailable = error { return true }
             return false
