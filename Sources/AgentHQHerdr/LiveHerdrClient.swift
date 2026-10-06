@@ -148,6 +148,30 @@ public actor LiveHerdrClient: HerdrClient {
         _ = try await request(method: "agent.prompt", params: ["target": paneId, "text": text])
     }
 
+    /// `focus: false`, so a workspace opened from the Mac does not take over
+    /// whatever a terminal attached to that herdr is showing. The ids are
+    /// opaque (`w9` was followed by `wA`), so they are read, never derived.
+    public func createWorkspace(cwd: String, label: String) async throws -> HerdrCreatedWorkspace {
+        let result = try await request(
+            method: "workspace.create",
+            params: ["cwd": cwd, "label": label, "focus": false]
+        )
+        guard let workspace = result["workspace"] as? [String: Any],
+              let workspaceId = workspace["workspace_id"] as? String,
+              let pane = result["root_pane"] as? [String: Any],
+              let paneId = pane["pane_id"] as? String
+        else {
+            throw HerdrProtocolError.malformedJSON("workspace.create has no workspace or root_pane id")
+        }
+        return HerdrCreatedWorkspace(
+            workspaceId: workspaceId, paneId: paneId, cwd: pane["cwd"] as? String
+        )
+    }
+
+    public func closeWorkspace(workspaceId: String) async throws {
+        _ = try await request(method: "workspace.close", params: ["workspace_id": workspaceId])
+    }
+
     public func focusPane(paneId: String) async throws {
         // Workspace first, then the pane: focusing the pane alone on a
         // workspace that is not showing leaves it behind whatever is.

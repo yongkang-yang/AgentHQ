@@ -552,6 +552,71 @@ public actor MachineSession {
         markSeen(agentId)
     }
 
+    // MARK: - Launching
+
+    /// Open a herdr workspace in a directory on this machine and start an
+    /// agent in it, returning the pane it was started in.
+    ///
+    /// The directory is looked up on the machine first, through
+    /// ``MachineShell``: the path is the machine's, `~` is its user's home,
+    /// and a typo should be refused before herdr opens a workspace on it.
+    ///
+    /// The agent is typed into the pane's shell with its newline in one call,
+    /// for the reason `submit` sends a blocked agent its answer that way.
+    public func launch(_ launcher: AgentLauncher, in typedDirectory: String) async throws -> AgentID {
+        guard let client else { throw LaunchError.machineUnreachable }
+        guard let script = LaunchDirectory.script(for: typedDirectory) else {
+            throw LaunchError.unsupportedPath
+        }
+        let output: Data
+        do {
+            output = try await MachineShell(transport: machine.transport).run(script)
+        } catch TransportError.tunnelExited(_, let stderr) {
+            throw LaunchError.directoryUnavailable(stderr)
+        }
+        guard let directory = LaunchDirectory.resolved(from: output) else {
+            throw LaunchError.directoryUnavailable("")
+        }
+        var created: HerdrCreatedWorkspace?
+        try await send {
+            created = try await client.createWorkspace(
+                cwd: directory, label: LaunchDirectory.label(for: directory)
+            )
+        }
+        guard let created else { throw LaunchError.machineUnreachable }
+        // herdr answers success even when it started the pane somewhere else
+        // (`$HOME`), which would be the agent working in the wrong tree. The
+        // directory was just resolved with `pwd -P`, the form herdr reports,
+        // so anything else means it moved between the two calls.
+        guard created.cwd == directory else {
+            try? await client.closeWorkspace(workspaceId: created.workspaceId)
+            throw LaunchError.directoryUnavailable(
+                "herdr opened \(created.cwd ?? "another directory") instead of \(directory)."
+            )
+        }
+        try await send {
+            try await client.sendText(paneId: created.paneId, text: launcher.command + "\n")
+        }
+        return AgentID(created.paneId)
+    }
+
+    /// Whether herdr has started reporting an agent in this pane, re-reading
+    /// the herd until it does or `timeout` passes.
+    ///
+    /// A freshly started agent takes a moment to be detected, and the status
+    /// watch only covers panes already in the list, so this does not wait
+    /// for an event that may never be subscribed to.
+    public func awaitAgent(_ agentId: AgentID, timeout: Duration = .seconds(20)) async -> Bool {
+        let deadline = ContinuousClock.now + timeout
+        while ContinuousClock.now < deadline {
+            if agents.contains(where: { $0.ref.agent == agentId }) { return true }
+            try? await resync()
+            if agents.contains(where: { $0.ref.agent == agentId }) { return true }
+            try? await Task.sleep(for: .seconds(1))
+        }
+        return false
+    }
+
     // MARK: - Interventions
 
     /// Do something to one agent on this machine, or refuse and say why.

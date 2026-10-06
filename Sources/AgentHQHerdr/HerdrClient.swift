@@ -222,6 +222,17 @@ public protocol HerdrClient: Sendable {
     func sendText(paneId: String, text: String) async throws
     func prompt(paneId: String, text: String) async throws
 
+    /// Open a workspace, unfocused, whose first pane starts in `cwd`. The
+    /// directory is the server's, not this Mac's.
+    ///
+    /// herdr does not refuse a directory it cannot enter: measured against
+    /// 0.9.2 and 0.9.3, a missing path, a file, a relative path and `~/…` all
+    /// open in `$HOME` and answer success. The returned `cwd` is where the
+    /// pane really started, for the caller to compare.
+    func createWorkspace(cwd: String, label: String) async throws -> HerdrCreatedWorkspace
+
+    func closeWorkspace(workspaceId: String) async throws
+
     /// Bring a pane to the front in its own herdr: the pane, and the workspace
     /// and tab holding it, or focusing the pane alone leaves it on a workspace
     /// nobody is looking at.
@@ -244,6 +255,14 @@ public protocol HerdrClient: Sendable {
 }
 
 public extension HerdrClient {
+    /// Only the live client opens workspaces; a test double that is not about
+    /// launching should not have to pretend to.
+    func createWorkspace(cwd: String, label: String) async throws -> HerdrCreatedWorkspace {
+        throw HerdrProtocolError.herdr(code: "unsupported", message: "this client cannot open workspaces")
+    }
+
+    func closeWorkspace(workspaceId: String) async throws {}
+
     /// A client with no live subscription has nothing to watch with.
     func watchAgentStatus(paneIds: Set<String>) async {}
 
@@ -251,5 +270,19 @@ public extension HerdrClient {
     /// were written against.
     func readPane(paneId: String, lines: Int) async throws -> String? {
         try await readPane(paneId: paneId, lines: lines, source: .recent)
+    }
+}
+
+/// What `workspace.create` answered: the ids to act on, and where the pane
+/// actually started.
+public struct HerdrCreatedWorkspace: Sendable, Equatable {
+    public let workspaceId: String
+    public let paneId: String
+    public let cwd: String?
+
+    public init(workspaceId: String, paneId: String, cwd: String?) {
+        self.workspaceId = workspaceId
+        self.paneId = paneId
+        self.cwd = cwd
     }
 }

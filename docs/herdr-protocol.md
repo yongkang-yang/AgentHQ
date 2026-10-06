@@ -277,6 +277,28 @@ Dotted, unlike every other event name. Subscribing without a `pane_id` fails
 with ``missing field `pane_id` ``; subscribing with an unknown one fails the
 whole request with `pane_not_found`.
 
+## `workspace.create` (New agent)
+
+Measured against herdr 0.9.2 on this Mac and 0.9.3 on WSL, through the tunnel.
+
+- Params are all optional: `cwd`, `label`, `focus` (default false), `env`,
+  `source_workspace_id`. There is no `command`; an invented one is ignored
+  and answered `ok`.
+- The reply is `{"type":"workspace_created","workspace":{…},"tab":{…},
+  "root_pane":{"pane_id":…,"cwd":…}}`. Ids are opaque (`w9` was followed by
+  `wA`; WSL gave `w1H`), so they are read, never derived.
+- **A bad `cwd` is not an error.** A missing path, a file, a relative path and
+  `~/…` (herdr does not expand `~`) all open the pane in `$HOME` and answer
+  success. So AgentHQ resolves the directory on the machine first
+  (`cd -- … && pwd -P` through `MachineShell`) and compares
+  `root_pane.cwd` with it, closing the workspace on a mismatch. herdr reports
+  the resolved path (`/tmp` comes back `/private/tmp`), which is why the
+  check compares against `pwd -P`.
+- Text sent to the root pane immediately after the reply is run: the tty
+  buffers it until the shell reads. `pane.send_input` (`text` plus `keys`)
+  is what `herdr pane run` sends; `agent.start` also exists but was only
+  measured locally, so New agent types the command with `pane.send_text`.
+
 ## `agent.explain` (decision)
 
 `StateClassifier` does not defer to `agent.explain`. Measured against herdr

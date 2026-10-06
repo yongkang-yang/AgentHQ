@@ -134,6 +134,14 @@ struct PanelView: View {
             if let local = fleet.snapshot.machines.first(where: { $0.machine.transport.isLocal }) {
                 OpenHerdrButton(view: local, fleet: fleet, note: $headerNote)
             }
+            if fleet.snapshot.machines.contains(where: { $0.reachability.isConnected }) {
+                // No Ghostty involved: herdr opens the workspace on its own
+                // machine and the console is the window onto it.
+                ActionButton(title: "New agent", tint: .primary) {
+                    NewAgentWindow.shared.open(fleet: fleet)
+                }
+                .help("Start an agent in a directory on any connected machine")
+            }
             SettingsMenu(
                 machines: fleet.snapshot.machines.map(MachineMenuEntry.init),
                 notifier: notifier,
