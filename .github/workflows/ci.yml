@@ -33,7 +33,12 @@ jobs:
       - name: Install Ghostty
         # The reveal test compiles its AppleScript against Ghostty's own
         # scripting dictionary, so the app has to be installed.
-        run: brew install --cask ghostty
+        # A fresh install is not in Launch Services yet, so AppleScript cannot
+        # resolve its bundle id until it is registered.
+        run: |
+          brew install --cask ghostty
+          /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f /Applications/Ghostty.app
+          osascript -e 'id of application id "com.mitchellh.ghostty"'
 
       - name: Test
         run: swift test
