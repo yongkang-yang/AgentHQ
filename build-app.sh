@@ -50,7 +50,7 @@ cat > "$APP_DIR/Contents/Info.plist" <<PLIST
     <key>LSMinimumSystemVersion</key><string>14.0</string>
     <!-- Menu bar only: no Dock icon, no app switcher entry. -->
     <key>LSUIElement</key><true/>
-    <key>NSHumanReadableCopyright</key><string>GPL-3.0</string>
+    <key>NSHumanReadableCopyright</key><string>MIT</string>
     <key>NSAppleEventsUsageDescription</key><string>Reveal brings the selected herdr conversation to the front in Ghostty.</string>
 </dict>
 </plist>

@@ -1,10 +1,7 @@
 AgentHQ
 Copyright (C) 2026 Yongkang Yang
 
-This program is free software: you can redistribute it and/or modify it under
-the terms of the GNU General Public License as published by the Free Software
-Foundation, either version 3 of the License, or (at your option) any later
-version. See LICENSE for the full text.
+This program is licensed under the MIT License. See LICENSE for the full text.
 
 
 THIRD-PARTY MATERIAL
@@ -18,7 +15,7 @@ Licensed under the MIT License.
 
 AgentHQ is an independent implementation, not a fork. Parts of it are ported
 from Shepherd, which is MIT-licensed and therefore may be incorporated into
-this GPL-3.0 work. Every ported file carries the MIT copyright notice at the
+this MIT-licensed work. Every ported file carries the MIT copyright notice at the
 top, as the MIT License requires, and that notice continues to apply to the
 ported material.
 
