@@ -155,7 +155,7 @@ emulator.
 
 ## License
 
-GPL-3.0 — see [LICENSE](LICENSE).
+MIT — see [LICENSE](LICENSE).
 
 Parts of AgentHQ are ported from
 [Shepherd / herdr-manager](https://github.com/sxp4931/herdr-manager) (MIT,
